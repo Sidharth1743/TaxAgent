@@ -1,0 +1,21 @@
+{
+  "query": "tax on hackathon winning",
+  "url": "https://www.taxtmi.com/tmi_search?allSearchQueries=tax+on+hackathon+winning",
+  "method": "stealth",
+  "results": [
+    {
+      "title": "Is tax applicable for Hackathon prize",
+      "url": "https://www.taxtmi.com/forum/issue?id=120217&allSearchQueries=tax on hackathon winning",
+      "type": "Discussion Forum",
+      "law": "Income Tax",
+      "snippet": "Whether a foreign hackathon cash prize received by an Indian resident student is taxable hinges on classification as  winnings/prize income  subject to special taxation or as ordinary income under personal slab rates, the correct ITR reporting head, and consequences of no withholding by the foreign payer; related compliance issues include FEMA formalities, recipient TDS or advance tax obligations, and lawful measures to minimize tax exposure while ensuring accurate disclosure."
+    },
+    {
+      "title": "Economic Survey 2018-19",
+      "url": "https://www.taxtmi.com/news?id=21575&allSearchQueries=tax on hackathon winning",
+      "type": "News",
+      "law": "",
+      "snippet": "News and Press Release Dated:- 4-7-2019 Private investment is advanced as the  key driver  of a self-sustaining virtuous cycle of savings, investment, exports, productivity and job creation; policy must therefore strengthen contract enforcement, complete financial-sector repair and insolvency processes, lower the cost of capital and reorient incentives away from perpetual size-based benefits toward time-bound support for young firms. Complementary tactics include applying behavioural economics to foster norm and compliance change and treating administrative and transaction data as a privacy-protected public good to enable evidence-based, real-time policymaking."
+    }
+  ]
+}
