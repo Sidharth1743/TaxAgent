@@ -1,0 +1,5 @@
+scrapling[fetchers]
+google-adk[a2a]
+uvicorn
+python-dotenv
+google-generativeai
