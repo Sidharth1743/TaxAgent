@@ -9,3 +9,7 @@ wheels/
 # Virtual environments
 .venv
 .env
+<<<<<<< HEAD
+=======
+.adk
+>>>>>>> 431f43074796d50431746738d2e5a86ef7718384

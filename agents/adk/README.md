@@ -1,6 +1,10 @@
 # ADK + A2A Setup
 
+<<<<<<< HEAD
 This project uses **Google ADK** and **A2A** to let CAClubIndia, TaxTMI, TurboTax, and TaxProfBlog agents negotiate a final answer using Gemini.
+=======
+This project uses **Google ADK** and **A2A** to let CAClubIndia and TaxTMI agents negotiate a final answer using Gemini.
+>>>>>>> 431f43074796d50431746738d2e5a86ef7718384
 
 ## Requirements
 Install dependencies:
@@ -29,6 +33,7 @@ uvicorn agents.adk.taxtmi_a2a.agent:a2a_app --port 8002
 ```
 
 ```bash
+<<<<<<< HEAD
 uvicorn agents.adk.turbotax_a2a.agent:a2a_app --port 8003
 ```
 
@@ -37,6 +42,8 @@ uvicorn agents.adk.taxprofblog_a2a.agent:a2a_app --port 8004
 ```
 
 ```bash
+=======
+>>>>>>> 431f43074796d50431746738d2e5a86ef7718384
 uvicorn agents.adk.root_agent.agent:a2a_app --port 8000
 ```
 
@@ -54,9 +61,12 @@ You can force a single source by adding a directive to your query:
 
 - `source:caclub tax on hackathon winning`
 - `source:taxtmi tax on hackathon winning`
+<<<<<<< HEAD
 - `source:turbotax tax on hackathon winning`
 - `source:taxprofblog tax on freelancer`
 - `source:us tax on freelancer`
+=======
+>>>>>>> 431f43074796d50431746738d2e5a86ef7718384
 - `source:both tax on hackathon winning`
 
 The root agent will ask both remote agents and respond with a cited answer.
