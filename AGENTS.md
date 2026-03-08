@@ -18,6 +18,7 @@
 - `./start_adk_servers.sh`: Launch A2A servers on ports `8000`–`8004`.
 - `python taxkanoon_sections.py --query "section 80c doctypes:laws"`: Fetch Indian Kanoon search results + section text files.
 - `python casemine_judgements.py --query "income from other source"`: Fetch Casemine judgements + text files (reads cookies from `casemine_cookies.txt` or `CASEMINE_COOKIE`).
+- `uvicorn graph_api:app --port 9000`: Run the knowledge graph web UI/API.
 
 If you need environment variables (e.g., `GOOGLE_API_KEY`), add them to a local `.env` file; the startup script loads it automatically.
 Casemine API requires cookies; store them in `casemine_cookies.txt` or set `CASEMINE_COOKIE` in `.env`.

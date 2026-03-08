@@ -1,10 +1,6 @@
 #!/usr/bin/env python3
 """
-<<<<<<< HEAD
 Root A2A agent orchestrating CAClubIndia, TaxTMI, TurboTax, and TaxProfBlog agents via ADK.
-=======
-Root A2A agent orchestrating CAClubIndia and TaxTMI agents via ADK.
->>>>>>> 431f43074796d50431746738d2e5a86ef7718384
 Produces evidence-weighted answer with inline URL citations.
 """
 
@@ -20,12 +16,14 @@ from google.adk.agents.llm_agent import Agent
 from google.adk.a2a.utils.agent_to_a2a import to_a2a
 from dotenv import load_dotenv
 
-<<<<<<< HEAD
 from memory.extractor import extract_memory
-from memory.spanner_graph import load_config, get_client, fetch_memory_context, upsert_basic_user_session, write_memory
-
-=======
->>>>>>> 431f43074796d50431746738d2e5a86ef7718384
+from memory.spanner_graph import (
+    load_config,
+    get_client,
+    fetch_memory_context,
+    upsert_basic_user_session,
+    write_memory,
+)
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 
 # Load environment variables (e.g., GOOGLE_API_KEY) from .env
@@ -137,7 +135,6 @@ async def fetch_taxtmi_a2a(query: str) -> Dict[str, Any]:
     return {"source": "taxtmi", "parsed": parsed, "raw_text": text}
 
 
-<<<<<<< HEAD
 async def fetch_turbotax_a2a(query: str) -> Dict[str, Any]:
     result = await _call_a2a_agent("http://localhost:8003", query)
     raw = result.get("raw")
@@ -160,8 +157,6 @@ async def fetch_taxprofblog_a2a(query: str) -> Dict[str, Any]:
     return {"source": "taxprofblog", "parsed": parsed, "raw_text": text}
 
 
-=======
->>>>>>> 431f43074796d50431746738d2e5a86ef7718384
 async def fetch_both_a2a(query: str) -> Dict[str, Any]:
     caclub_res, taxtmi_res = await asyncio.gather(
         fetch_caclub_a2a(query), fetch_taxtmi_a2a(query)
@@ -169,7 +164,6 @@ async def fetch_both_a2a(query: str) -> Dict[str, Any]:
     return {"caclub": caclub_res, "taxtmi": taxtmi_res}
 
 
-<<<<<<< HEAD
 async def fetch_us_a2a(query: str) -> Dict[str, Any]:
     turbotax_res, taxprof_res = await asyncio.gather(
         fetch_turbotax_a2a(query), fetch_taxprofblog_a2a(query)
@@ -358,31 +352,15 @@ def persist_memory_tool(query: str, user_id: str, session_id: str, answer_json: 
         return {"ok": False, "reason": str(e)}
 
 
-=======
->>>>>>> 431f43074796d50431746738d2e5a86ef7718384
-def _evidence_from_parsed(parsed: Dict[str, Any]) -> List[Dict[str, Any]]:
-    evidence = []
-    if not parsed:
-        return evidence
-    for ev in parsed.get("evidence", []):
-        evidence.append(ev)
-    return evidence
-
-
 root_agent = Agent(
     name="taxclarity_root",
     model="gemini-3.1-flash-lite-preview",
-<<<<<<< HEAD
     description="Reconciles CAClubIndia, TaxTMI, TurboTax, and TaxProfBlog evidence into a single cited answer.",
-=======
-    description="Reconciles CAClubIndia and TaxTMI evidence into a single cited answer.",
->>>>>>> 431f43074796d50431746738d2e5a86ef7718384
     instruction=(
         "You are the root agent. For every user query:\n"
         "1) If the user specifies a source directive, follow it:\n"
         "   - 'source:caclub' => only CAClubIndia\n"
         "   - 'source:taxtmi' => only TaxTMI\n"
-<<<<<<< HEAD
         "   - 'source:turbotax' => only TurboTax\n"
         "   - 'source:taxprofblog' => only TaxProfBlog\n"
         "   - 'source:us' => TurboTax + TaxProfBlog\n"
@@ -391,15 +369,10 @@ root_agent = Agent(
         "2) If source is both, call fetch_both_a2a (parallel) to get evidence.\n"
         "   If source is us, call fetch_us_a2a (parallel) to get evidence.\n"
         "   If source is all, call fetch_all_a2a (parallel) to get evidence.\n"
-=======
-        "   - 'source:both' or no directive => both\n"
-        "2) If source is both, call fetch_both_a2a (parallel) to get evidence.\n"
->>>>>>> 431f43074796d50431746738d2e5a86ef7718384
         "   If source is single, call the matching single-source tool.\n"
         "3) Use ONLY the returned JSON evidence (title/url/snippet/date/reply_count).\n"
         "4) Merge evidence; if both sources support the same claim, raise confidence.\n"
         "5) Prefer replies (threads with responses) for higher confidence.\n"
-<<<<<<< HEAD
         "6) Return ONLY valid JSON (no markdown, no prose).\n"
         "7) JSON schema:\n"
         "   {\n"
@@ -440,12 +413,6 @@ root_agent = Agent(
         persist_memory_tool,
         finalize_response,
     ],
-=======
-        "6) Provide the final answer with inline URL citations per claim.\n"
-        "7) Keep citations as a list of URLs next to each claim.\n"
-    ),
-    tools=[fetch_caclub_a2a, fetch_taxtmi_a2a, fetch_both_a2a],
->>>>>>> 431f43074796d50431746738d2e5a86ef7718384
 )
 
 
