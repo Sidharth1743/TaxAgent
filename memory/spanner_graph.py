@@ -36,6 +36,9 @@ def load_config() -> Optional[SpannerConfig]:
 def get_client(cfg: SpannerConfig):
     if not spanner:
         raise RuntimeError("google-cloud-spanner is not installed")
+    # Silence noisy built-in metrics exporter unless explicitly enabled.
+    if os.getenv("SPANNER_DISABLE_BUILTIN_METRICS", "") == "":
+        os.environ["SPANNER_DISABLE_BUILTIN_METRICS"] = "true"
     client = spanner.Client(project=cfg.project_id)
     instance = client.instance(cfg.instance_id)
     database = instance.database(cfg.database_id)
@@ -333,9 +336,12 @@ def fetch_memory_context(
     if not concepts and not entities:
         return {"prior_resolutions": [], "unresolved_queries": []}
 
-    concept_clause = " OR ".join(["c.name=@c" for _ in concepts]) if concepts else ""
-    entity_clause = " OR ".join(["e.name=@e" for _ in entities]) if entities else ""
-    where = " OR ".join([c for c in [concept_clause, entity_clause] if c]) or "1=0"
+    clauses = []
+    if concepts:
+        clauses.append("c.name IN UNNEST(@concepts)")
+    if entities:
+        clauses.append("e.name IN UNNEST(@entities)")
+    where = " OR ".join(clauses) or "1=0"
 
     sql = f"""
     SELECT q.text AS query_text, r.status AS status, r.created_at AS created_at
@@ -353,11 +359,11 @@ def fetch_memory_context(
     params = {}
     param_types = {}
     if concepts:
-        params["c"] = concepts[0]
-        param_types["c"] = spanner.param_types.STRING
+        params["concepts"] = concepts
+        param_types["concepts"] = spanner.param_types.Array(spanner.param_types.STRING)
     if entities:
-        params["e"] = entities[0]
-        param_types["e"] = spanner.param_types.STRING
+        params["entities"] = entities
+        param_types["entities"] = spanner.param_types.Array(spanner.param_types.STRING)
 
     prior = []
     with database.snapshot() as snapshot:

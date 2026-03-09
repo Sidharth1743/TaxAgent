@@ -1,52 +1,52 @@
-import requests
+#!/usr/bin/env python3
+"""CLI entry point for TaxAgent services."""
 
-url = "https://api.cludo.com/api/v3/search"
+import argparse
+import subprocess
+import sys
+import os
 
-params = {
-    "query": "tax on hackathon winning",
-    "page": 1,
-    "per_page": 10
-}
 
-headers = {
-    "Content-Type": "application/json"
-}
+def main():
+    parser = argparse.ArgumentParser(description="TaxAgent CLI")
+    sub = parser.add_subparsers(dest="command")
 
-r = requests.get(url, params=params, headers=headers)
+    sub.add_parser("serve", help="Start all A2A agent servers")
+    sub.add_parser("graph-api", help="Start the Graph API server")
 
-data = r.json()
+    scrape = sub.add_parser("scrape", help="Run a scraper directly")
+    scrape.add_argument("scraper", choices=["caclub", "taxtmi", "turbotax", "taxkanoon", "casemine"])
+    scrape.add_argument("--query", required=True)
+    scrape.add_argument("--max-links", type=int, default=5)
 
-print(data)
-from scrapling import Fetcher
+    args = parser.parse_args()
+    root = os.path.dirname(os.path.abspath(__file__))
 
-Fetcher.configure(adaptive=True)
+    if args.command == "serve":
+        script = os.path.join(root, "scripts", "start_servers.sh")
+        sys.exit(subprocess.call(["bash", script]))
 
-url = "https://www.taxtmi.com/article/detailed?id=11385&allSearchQueries=tax%20for%20freelancers"
+    elif args.command == "graph-api":
+        sys.exit(subprocess.call([
+            sys.executable, "-m", "uvicorn", "graph_api:app",
+            "--port", "9000", "--reload",
+        ]))
 
-fetcher = Fetcher()
-response = fetcher.get(url)
+    elif args.command == "scrape":
+        scripts = {
+            "caclub": "agents/caclub_agent.py",
+            "taxtmi": "agents/taxtmi_agent.py",
+            "turbotax": "agents/turbotax_agent.py",
+            "taxkanoon": "scraping/taxkanoon.py",
+            "casemine": "scraping/casemine.py",
+        }
+        script = os.path.join(root, scripts[args.scraper])
+        cmd = [sys.executable, script, "--query", args.query, "--max-links", str(args.max_links)]
+        sys.exit(subprocess.call(cmd))
 
-title = response.css(".ques .title::text").get()
-author = response.css(".ques .user-info .name::text").get()
-date = response.css(".ques .date::text").get()
+    else:
+        parser.print_help()
 
-summary = response.css(".summary::text").get()
 
-article = " ".join(response.css(".desc .text p::text").getall())
-
-answers = []
-for ans in response.css(".answer .text"):
-    answers.append(" ".join(ans.css("p::text").getall()))
-
-print("TITLE:", title)
-print("AUTHOR:", author)
-print("DATE:", date)
-
-print("\nSUMMARY:")
-print(summary)
-
-print("\nARTICLE:")
-print(article[:500])
-
-print("\nANSWERS:")
-print(answers)
+if __name__ == "__main__":
+    main()

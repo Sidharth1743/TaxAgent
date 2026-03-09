@@ -4,7 +4,10 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
+import re
+import time
 from typing import Any, Dict
 
 try:
@@ -12,6 +15,7 @@ try:
 except Exception:  # pragma: no cover - optional runtime dependency
     genai = None
 
+logger = logging.getLogger(__name__)
 
 EXTRACTOR_PROMPT = """You are a structured extractor for tax-related user memory.
 Return ONLY valid JSON matching this schema:
@@ -34,18 +38,52 @@ Return ONLY valid JSON matching this schema:
 If a field is unknown, use empty string or empty array.
 """
 
+_configured = False
 
-def extract_memory(text: str) -> Dict[str, Any]:
+
+def _ensure_configured() -> bool:
+    global _configured
     if not genai:
-        return {}
+        return False
+    if _configured:
+        return True
     api_key = os.getenv("GOOGLE_API_KEY", "").strip()
     if not api_key:
-        return {}
+        return False
     genai.configure(api_key=api_key)
-    model = genai.GenerativeModel("gemini-3.1-flash-lite-preview")
-    resp = model.generate_content([EXTRACTOR_PROMPT, text])
-    try:
-        data = json.loads(resp.text)
-    except Exception:
+    _configured = True
+    return True
+
+
+def _strip_code_fences(text: str) -> str:
+    text = text.strip()
+    text = re.sub(r"^```(?:json)?\s*\n?", "", text)
+    text = re.sub(r"\n?```\s*$", "", text)
+    return text.strip()
+
+
+def extract_memory(text: str, max_retries: int = 3) -> Dict[str, Any]:
+    if not _ensure_configured():
         return {}
-    return data if isinstance(data, dict) else {}
+
+    model = genai.GenerativeModel("gemini-3.1-flash-lite-preview")
+
+    for attempt in range(max_retries):
+        try:
+            resp = model.generate_content([EXTRACTOR_PROMPT, text])
+            raw = _strip_code_fences(resp.text)
+            data = json.loads(raw)
+            if not isinstance(data, dict):
+                logger.warning("Extractor returned non-dict (attempt %d)", attempt + 1)
+                continue
+            if "concepts" not in data or "intent" not in data:
+                logger.warning("Extractor response missing required keys (attempt %d)", attempt + 1)
+                continue
+            return data
+        except Exception:
+            logger.exception("Extractor attempt %d failed", attempt + 1)
+            if attempt < max_retries - 1:
+                time.sleep(2 ** attempt)
+
+    logger.error("All %d extractor attempts failed for input length %d", max_retries, len(text))
+    return {}

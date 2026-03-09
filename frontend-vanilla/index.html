@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TaxClarity — AI Tax Advisor</title>
+  <meta name="description" content="Voice-first AI tax advisor. See, Hear, Speak — tax advice without borders." />
+  <meta name="theme-color" content="#050810" />
+
+  <!-- Fonts: Syne (display), Outfit (body), JetBrains Mono (data) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+
+  <!-- D3.js for knowledge graph -->
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <!-- OGL for WebGL orb -->
+  <script src="https://unpkg.com/ogl@1.0.11/dist/ogl.umd.js"></script>
+
+  <link rel="stylesheet" href="/frontend/styles.css" />
+</head>
+<body>
+
+  <!-- Noise texture overlay -->
+  <svg class="noise-layer" aria-hidden="true">
+    <filter id="noiseFilter">
+      <feTurbulence type="fractalNoise" baseFrequency="0.65" numOctaves="3" stitchTiles="stitch"/>
+      <feColorMatrix type="saturate" values="0"/>
+    </filter>
+    <rect width="100%" height="100%" filter="url(#noiseFilter)" opacity="0.03"/>
+  </svg>
+
+  <!-- Grid overlay -->
+  <div class="grid-overlay" aria-hidden="true"></div>
+
+  <!-- Ambient background particles -->
+  <canvas id="bgParticles" class="bg-particles"></canvas>
+
+  <!-- Scan line effect -->
+  <div class="scanline" aria-hidden="true"></div>
+
+  <!-- App shell -->
+  <div id="app" class="app-shell">
+
+    <!-- Header -->
+    <header class="header" data-reveal="1">
+      <div class="header__left">
+        <div class="header__logo">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+            <path d="M12 2L2 7l10 5 10-5-10-5z" fill="url(#logoGrad)" opacity="0.9"/>
+            <path d="M2 17l10 5 10-5M2 12l10 5 10-5" stroke="url(#logoGrad)" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+            <defs><linearGradient id="logoGrad" x1="2" y1="2" x2="22" y2="22"><stop stop-color="#a78bfa"/><stop offset="1" stop-color="#4cc9f0"/></linearGradient></defs>
+          </svg>
+          <div class="header__logo-ring"></div>
+        </div>
+        <div class="header__title">
+          <span class="header__brand">TaxClarity</span>
+          <span class="header__tagline">voice-first tax intelligence</span>
+        </div>
+      </div>
+      <div class="header__center">
+        <div class="header__signal">
+          <span class="header__signal-bar"></span>
+          <span class="header__signal-bar"></span>
+          <span class="header__signal-bar"></span>
+        </div>
+      </div>
+      <div class="header__right">
+        <div id="connectionStatus" class="status-badge status-badge--offline">
+          <span class="status-badge__dot"></span>
+          <span class="status-badge__text">Offline</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main layout -->
+    <main class="main-layout">
+
+      <!-- Left: Knowledge Graph -->
+      <aside class="panel panel--graph" data-reveal="2">
+        <div class="panel__header">
+          <div class="panel__header-left">
+            <div class="panel__icon-wrap panel__icon-wrap--graph">
+              <svg class="panel__icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v4m0 12v4m-7.07-3.93l2.83-2.83m8.48-8.48l2.83-2.83M2 12h4m12 0h4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83"/></svg>
+            </div>
+            <span class="panel__title">Knowledge Graph</span>
+          </div>
+          <button id="refreshGraph" class="panel__action" title="Refresh graph">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2v6h-6M3 12a9 9 0 0115.36-6.36L21 8M3 22v-6h6M21 12a9 9 0 01-15.36 6.36L3 16"/></svg>
+          </button>
+        </div>
+        <div class="graph-container" id="graphContainer">
+          <svg id="graphSvg" class="graph-svg"></svg>
+        </div>
+        <!-- Node inspector -->
+        <div id="nodeInspector" class="node-inspector" style="display:none;">
+          <div class="node-inspector__type" id="inspectorType"></div>
+          <div class="node-inspector__label" id="inspectorLabel"></div>
+          <div class="node-inspector__meta" id="inspectorMeta"></div>
+        </div>
+        <!-- Legend -->
+        <div class="graph-legend" id="graphLegend"></div>
+      </aside>
+
+      <!-- Center: Voice + Chat -->
+      <section class="panel panel--center" data-reveal="3">
+
+        <!-- Voice Orb -->
+        <div class="orb-area">
+          <div class="orb-stage">
+            <div class="orb-ring orb-ring--3"></div>
+            <div class="orb-ring orb-ring--2"></div>
+            <div class="orb-ring orb-ring--1"></div>
+            <div id="orbContainer" class="orb-canvas-wrap" title="Click to start/stop listening">
+              <!-- WebGL canvas injected here by voice-orb.js -->
+            </div>
+          </div>
+          <div class="orb-status">
+            <p id="orbLabel" class="orb-label">Click to begin</p>
+          </div>
+        </div>
+
+        <!-- Chat -->
+        <div class="chat-area" id="chatMessages">
+          <div class="chat-empty">
+            <div class="chat-empty__rings">
+              <div class="chat-empty__ring"></div>
+              <div class="chat-empty__ring"></div>
+            </div>
+            <p class="chat-empty__title">Ask anything about taxes</p>
+            <p class="chat-empty__sub">Voice or text &middot; India &amp; US &middot; Grounded in expert sources</p>
+          </div>
+        </div>
+
+        <!-- Input -->
+        <div class="input-bar">
+          <form id="chatForm" class="input-bar__form">
+            <button type="button" id="cameraBtn" class="input-bar__action input-bar__action--camera" title="Scan document">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg>
+            </button>
+            <input type="file" id="fileInput" accept="image/*" class="hidden" />
+            <textarea
+              id="chatInput"
+              placeholder="Ask a tax question..."
+              class="input-bar__textarea"
+              autocomplete="off"
+              spellcheck="false"
+              rows="1"
+            ></textarea>
+            <button type="submit" id="submitBtn" class="input-bar__action input-bar__action--submit" title="Send" data-state="send">
+              <svg class="submit-icon submit-icon--send" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+              <svg class="submit-icon submit-icon--stop" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="5" width="14" height="14" rx="2"/></svg>
+            </button>
+          </form>
+          <div class="input-bar__hint">
+            <kbd>Enter</kbd> to send &middot; <kbd>Shift+Enter</kbd> for newline
+          </div>
+        </div>
+      </section>
+
+      <!-- Right: Sources -->
+      <aside class="panel panel--sources" data-reveal="4">
+        <div class="panel__header">
+          <div class="panel__header-left">
+            <div class="panel__icon-wrap panel__icon-wrap--sources">
+              <svg class="panel__icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+            </div>
+            <span class="panel__title">Source Evidence</span>
+          </div>
+          <span class="panel__count" id="sourceCount">0</span>
+        </div>
+        <div id="sourceCards" class="sources-list">
+          <div class="sources-empty">
+            <div class="sources-empty__icon">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" opacity="0.3"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 002 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0022 16z"/></svg>
+            </div>
+            <p>Sources appear as the<br>agent researches</p>
+          </div>
+        </div>
+      </aside>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer" data-reveal="5">
+      <div class="footer__jurisdictions">
+        <button class="footer__pill footer__pill--active" data-region="india">
+          <span class="footer__flag">IN</span> India
+        </button>
+        <button class="footer__pill" data-region="us">
+          <span class="footer__flag">US</span> USA
+        </button>
+        <button class="footer__pill" data-region="cross">
+          <span class="footer__flag">CB</span> Cross-border
+        </button>
+      </div>
+      <div class="footer__meta">
+        <span class="footer__stack">Gemini Live</span>
+        <span class="footer__divider"></span>
+        <span class="footer__stack">ADK</span>
+        <span class="footer__divider"></span>
+        <span class="footer__stack">Spanner Graph</span>
+      </div>
+    </footer>
+  </div>
+
+  <!-- Textarea auto-resize + Enter/Shift+Enter behavior -->
+  <script>
+  (() => {
+    const textarea = document.getElementById('chatInput');
+    const form = document.getElementById('chatForm');
+    const submitBtn = document.getElementById('submitBtn');
+    if (!textarea || !form) return;
+
+    // Auto-resize textarea
+    function autoResize() {
+      textarea.style.height = 'auto';
+      const maxH = 160; // ~6 lines
+      textarea.style.height = Math.min(textarea.scrollHeight, maxH) + 'px';
+      textarea.style.overflowY = textarea.scrollHeight > maxH ? 'auto' : 'hidden';
+    }
+    textarea.addEventListener('input', autoResize);
+
+    // Enter = submit, Shift+Enter = newline
+    textarea.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        const val = textarea.value.trim();
+        if (val.length > 0) {
+          form.requestSubmit();
+        }
+      }
+    });
+
+    // Reset textarea height after submit
+    form.addEventListener('submit', () => {
+      requestAnimationFrame(() => {
+        textarea.style.height = 'auto';
+      });
+    });
+
+    // Send/Stop button state management
+    // Observe the orb container's data-state attribute to toggle button
+    const orbContainer = document.getElementById('orbContainer');
+    if (orbContainer && submitBtn) {
+      const observer = new MutationObserver(() => {
+        const orbState = orbContainer.getAttribute('data-state');
+        if (orbState === 'thinking' || orbState === 'speaking') {
+          submitBtn.setAttribute('data-state', 'stop');
+        } else {
+          submitBtn.setAttribute('data-state', 'send');
+        }
+      });
+      observer.observe(orbContainer, { attributes: true, attributeFilter: ['data-state'] });
+    }
+  })();
+  </script>
+
+  <!-- Scripts (order matters) -->
+  <script src="/frontend/components/voice-orb.js"></script>
+  <script src="/frontend/components/chat-panel.js"></script>
+  <script src="/frontend/components/graph-panel.js"></script>
+  <script src="/frontend/components/source-cards.js"></script>
+  <script src="/frontend/components/doc-scanner.js"></script>
+  <script src="/frontend/app.js"></script>
+</body>
+</html>

@@ -9,7 +9,14 @@ wheels/
 # Virtual environments
 .venv
 .env
-<<<<<<< HEAD
-=======
+
+# Data and cache
+data/*.json
+dumps/
+dumps_taxtmi/
+indiankanoon_text/
+casemine_text/
+
+# ADK session data
+agents/.adk/
 .adk
->>>>>>> 431f43074796d50431746738d2e5a86ef7718384

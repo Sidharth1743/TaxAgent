@@ -10,6 +10,12 @@ from urllib.parse import quote_plus
 
 from scrapling import Fetcher, DynamicFetcher, StealthyFetcher
 
+from scraping.utils import (
+    fetch_with_fallbacks as _fetch_with_fallbacks_shared,
+    is_blocked as _is_blocked_shared,
+    page_text as _page_text_shared,
+)
+
 DEFAULT_CACLUBINDIA_URLS = [
     "https://www.caclubindia.com/experts/"
     "regarding-hackathon-prize-w-8ben-form-tax-treaty-benefit-115bb-115bbj-2952254.asp",
@@ -21,43 +27,15 @@ DEFAULT_CACLUBINDIA_URLS = [
 
 
 def _page_text(page) -> str:
-    # Normalize page text for simple block detection.
-    return " ".join(page.css("body *::text").getall()).lower()
+    return _page_text_shared(page)
 
 
 def _is_blocked(page) -> bool:
-    title = (page.css("title::text").get() or "").lower()
-    text = _page_text(page)
-    blockers = [
-        "just a moment",
-        "attention required",
-        "cloudflare",
-        "captcha",
-        "verify you are human",
-    ]
-    return any(b in title or b in text for b in blockers)
+    return _is_blocked_shared(page)
 
 
 def _fetch_with_fallbacks(url: str, wait_selector: str = "body"):
-    # 1) Try plain HTTP first.
-    page = Fetcher.get(url)
-    if not _is_blocked(page):
-        return page, "http"
-
-    # 2) Try dynamic (Playwright) for JS-heavy pages.
-    page = DynamicFetcher.fetch(url, wait_selector=wait_selector, network_idle=True)
-    if not _is_blocked(page):
-        return page, "dynamic"
-
-    # 3) Try stealth for anti-bot protection.
-    page = StealthyFetcher.fetch(
-        url,
-        wait_selector=wait_selector,
-        network_idle=True,
-        solve_cloudflare=True,
-        timeout=60000,
-    )
-    return page, "stealth"
+    return _fetch_with_fallbacks_shared(url, wait_selector=wait_selector)
 
 
 def _fetch_forum(url: str, mode: str, wait_selector: str = "body") -> Tuple[object, str]:

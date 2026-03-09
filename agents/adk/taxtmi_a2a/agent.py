@@ -7,13 +7,13 @@ Runs the TaxTMI scraper and returns structured evidence.
 import json
 import os
 import subprocess
-import hashlib
-import time
 from typing import Any, Dict, List
 
 from google.adk.agents.llm_agent import Agent
 from google.adk.a2a.utils.agent_to_a2a import to_a2a
 from dotenv import load_dotenv
+
+from agents.adk.cache import cached_run
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 AGENT_SCRIPT = os.path.join(ROOT, "agents", "taxtmi_agent.py")
@@ -35,14 +35,7 @@ def _load_json(path: str) -> Dict[str, Any]:
         return json.load(f)
 
 
-def fetch_taxtmi(query: str, max_links: int = 5) -> Dict[str, Any]:
-    os.makedirs(DATA_DIR, exist_ok=True)
-    cache_key = hashlib.sha256(query.encode("utf-8")).hexdigest()
-    cache_path = os.path.join(DATA_DIR, f"taxtmi_cache_{cache_key}.json")
-    if os.path.exists(cache_path) and (time.time() - os.path.getmtime(cache_path) < 600):
-        with open(cache_path, "r", encoding="utf-8") as f:
-            return json.load(f)
-
+def _fetch_taxtmi_uncached(query: str, max_links: int = 5) -> Dict[str, Any]:
     search_out = os.path.join(DATA_DIR, "taxtmi_search.json")
     results_out = os.path.join(DATA_DIR, "taxtmi_results.json")
 
@@ -94,10 +87,16 @@ def fetch_taxtmi(query: str, max_links: int = 5) -> Dict[str, Any]:
             }
         )
 
-    payload = {"query": query, "source": "taxtmi", "evidence": evidence}
-    with open(cache_path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, indent=2, ensure_ascii=True)
-    return payload
+    return {"query": query, "source": "taxtmi", "evidence": evidence}
+
+
+def fetch_taxtmi(query: str, max_links: int = 5) -> Dict[str, Any]:
+    return cached_run(
+        source_name="taxtmi",
+        query=query,
+        runner_fn=lambda q: _fetch_taxtmi_uncached(q, max_links),
+        data_dir=DATA_DIR,
+    )
 
 
 root_agent = Agent(

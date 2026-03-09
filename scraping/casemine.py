@@ -13,39 +13,15 @@ from scrapling import Fetcher, DynamicFetcher, StealthyFetcher
 from parsel import Selector
 from dotenv import load_dotenv
 
+from scraping.utils import (
+    fetch_with_fallbacks as _fetch_with_fallbacks,
+    is_blocked as _is_blocked,
+    page_text as _page_text,
+    page_html as _page_html_util,
+)
+
 BASE_URL = "https://www.casemine.com"
 API_URL = "https://www.casemine.com/search/opinion"
-
-
-def _page_text(page) -> str:
-    return " ".join(page.css("body *::text").getall()).lower()
-
-
-def _is_blocked(page) -> bool:
-    title = (page.css("title::text").get() or "").lower()
-    text = _page_text(page)
-    blockers = ["captcha", "verify you are human", "access denied", "login"]
-    return any(b in title or b in text for b in blockers)
-
-
-def _fetch_with_fallbacks(url: str, wait_selector: str = "body", headers: Optional[Dict[str, str]] = None):
-    page = Fetcher.get(url, headers=headers or {})
-    if not _is_blocked(page):
-        return page, "http"
-
-    page = DynamicFetcher.fetch(url, wait_selector=wait_selector, network_idle=True)
-    if not _is_blocked(page):
-        return page, "dynamic"
-
-    page = StealthyFetcher.fetch(
-        url,
-        wait_selector=wait_selector,
-        network_idle=True,
-        solve_cloudflare=True,
-        timeout=60000,
-        headers=headers or {},
-    )
-    return page, "stealth"
 
 
 def _build_search_url(query: str) -> str:
@@ -62,33 +38,7 @@ def _safe_name(text: str) -> str:
 
 
 def _page_html(page) -> str:
-    for attr in ("html", "content", "text", "page_source"):
-        if hasattr(page, attr):
-            value = getattr(page, attr)
-            if callable(value):
-                try:
-                    value = value()
-                except Exception:
-                    value = ""
-            if isinstance(value, bytes):
-                value = value.decode("utf-8", errors="ignore")
-            if isinstance(value, str) and value.strip():
-                return value
-    if hasattr(page, "response"):
-        resp = page.response
-        for attr in ("text", "content"):
-            if hasattr(resp, attr):
-                value = getattr(resp, attr)
-                if callable(value):
-                    try:
-                        value = value()
-                    except Exception:
-                        value = ""
-                if isinstance(value, bytes):
-                    value = value.decode("utf-8", errors="ignore")
-                if isinstance(value, str) and value.strip():
-                    return value
-    return ""
+    return _page_html_util(page)
 
 
 def _dump_html(page, dump_path: Optional[str]) -> None:

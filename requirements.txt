@@ -3,5 +3,7 @@ google-adk[a2a]
 uvicorn
 python-dotenv
 google-generativeai
+google-genai
 fastapi
-uvicorn
+httpx
+websockets

@@ -14,27 +14,23 @@ from urllib.parse import quote_plus
 
 from scrapling import Fetcher, DynamicFetcher, StealthyFetcher
 
+from scraping.utils import (
+    is_blocked as _is_blocked_shared,
+    page_text as _page_text_shared,
+    page_html as _page_html_shared,
+)
+
 DEFAULT_TURBOTAX_URLS = [
     "https://turbotax.intuit.com/search/#?cludoquery=tax%20on%20hackathon%20winning&cludopage=1",
 ]
 
 
 def _page_text(page) -> str:
-    return " ".join(page.css("body *::text").getall()).lower()
+    return _page_text_shared(page)
 
 
 def _is_blocked(page) -> bool:
-    title = (page.css("title::text").get() or "").lower()
-    text = _page_text(page)
-    blockers = [
-        "just a moment",
-        "attention required",
-        "cloudflare",
-        "captcha",
-        "verify you are human",
-        "enable javascript",
-    ]
-    return any(b in title or b in text for b in blockers)
+    return _is_blocked_shared(page, extra_patterns=["enable javascript"])
 
 
 def _fetch_with_fallbacks(url: str, wait_selector: str = "body", allow_browser: bool = True):
@@ -85,33 +81,7 @@ def _maybe_dump_html(page, url: str, dump_dir: Optional[str]) -> None:
 
 
 def _page_html(page) -> str:
-    for attr in ("html", "content", "text", "page_source"):
-        if hasattr(page, attr):
-            value = getattr(page, attr)
-            if callable(value):
-                try:
-                    value = value()
-                except Exception:
-                    value = ""
-            if isinstance(value, bytes):
-                value = value.decode("utf-8", errors="ignore")
-            if isinstance(value, str) and value.strip():
-                return value
-    if hasattr(page, "response"):
-        resp = page.response
-        for attr in ("text", "content"):
-            if hasattr(resp, attr):
-                value = getattr(resp, attr)
-                if callable(value):
-                    try:
-                        value = value()
-                    except Exception:
-                        value = ""
-                if isinstance(value, bytes):
-                    value = value.decode("utf-8", errors="ignore")
-                if isinstance(value, str) and value.strip():
-                    return value
-    return ""
+    return _page_html_shared(page)
 
 
 def _extract_title(page) -> str:

@@ -11,37 +11,9 @@ import os
 
 from scrapling import Fetcher, DynamicFetcher, StealthyFetcher
 
+from scraping.utils import fetch_with_fallbacks as _fetch_with_fallbacks, safe_name as _safe_name
+
 BASE_URL = "https://indiankanoon.org"
-
-
-def _page_text(page) -> str:
-    return " ".join(page.css("body *::text").getall()).lower()
-
-
-def _is_blocked(page) -> bool:
-    title = (page.css("title::text").get() or "").lower()
-    text = _page_text(page)
-    blockers = ["captcha", "verify you are human", "access denied"]
-    return any(b in title or b in text for b in blockers)
-
-
-def _fetch_with_fallbacks(url: str, wait_selector: str = "body"):
-    page = Fetcher.get(url)
-    if not _is_blocked(page):
-        return page, "http"
-
-    page = DynamicFetcher.fetch(url, wait_selector=wait_selector, network_idle=True)
-    if not _is_blocked(page):
-        return page, "dynamic"
-
-    page = StealthyFetcher.fetch(
-        url,
-        wait_selector=wait_selector,
-        network_idle=True,
-        solve_cloudflare=True,
-        timeout=60000,
-    )
-    return page, "stealth"
 
 
 def _build_search_url(query: str) -> str:
@@ -95,11 +67,6 @@ def _extract_section(page) -> Dict[str, str]:
         content = " ".join([" ".join(t.split()) for t in text_nodes]).strip()
 
     return {"title": title, "docsource": docsource, "content": content}
-
-
-def _safe_name(text: str) -> str:
-    text = re.sub(r"[^a-zA-Z0-9]+", "_", text).strip("_")
-    return text[:120] or "doc"
 
 
 def run(urls: List[str], text_out_dir: Optional[str] = None) -> Dict[str, object]:

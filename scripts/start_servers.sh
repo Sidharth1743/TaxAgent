@@ -4,7 +4,7 @@ set -euo pipefail
 # Start A2A servers for CAClubIndia, TaxTMI, TurboTax, TaxProfBlog, and Root agent.
 # Usage: ./start_adk_servers.sh
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 export PYTHONUNBUFFERED=1
 
