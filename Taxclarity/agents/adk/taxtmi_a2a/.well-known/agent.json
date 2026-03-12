@@ -1,0 +1,16 @@
+{
+  "name": "India Tax Agent (TaxTMI)",
+  "description": "Indian tax compliance specialist - Income Tax, Section 44ADA, 80C, GST, TDS, Form 16",
+  "version": "1.0.0",
+  "jurisdiction": "india",
+  "capabilities": [
+    "income_tax",
+    "section_44ada",
+    "section_80c",
+    "gst",
+    "tds",
+    "form_16"
+  ],
+  "endpoint": "http://localhost:8002",
+  "language": "en"
+}

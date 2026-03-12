@@ -1,0 +1,7 @@
+web.root: uvicorn agents.adk.root_agent.agent:a2a_app --host 0.0.0.0 --port 8000 --workers 1
+web.caclub: uvicorn agents.adk.caclub_a2a.agent:a2a_app --host 0.0.0.0 --port 8001 --workers 1
+web.taxtmi: uvicorn agents.adk.taxtmi_a2a.agent:a2a_app --host 0.0.0.0 --port 8002 --workers 1
+web.ws: uvicorn backend.websocket_server:app --host 0.0.0.0 --port 8003 --workers 1
+web.taxprofblog: uvicorn agents.adk.taxprofblog_a2a.agent:a2a_app --host 0.0.0.0 --port 8004 --workers 1
+web.turbotax: uvicorn agents.adk.turbotax_a2a.agent:a2a_app --host 0.0.0.0 --port 8005 --workers 1
+web.graphapi: uvicorn backend.graph_api:app --host 0.0.0.0 --port 8006 --workers 1

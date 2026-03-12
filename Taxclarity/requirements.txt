@@ -1,0 +1,17 @@
+scrapling[fetchers]
+google-adk[a2a]
+uvicorn
+python-dotenv
+google-generativeai
+google-genai
+google-cloud-spanner
+fastapi
+httpx
+parsel
+praw
+requests
+structlog
+google-cloud-documentai
+python-multipart
+honcho
+pageindex

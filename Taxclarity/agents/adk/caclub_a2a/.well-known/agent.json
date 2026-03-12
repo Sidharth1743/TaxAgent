@@ -1,0 +1,16 @@
+{
+  "name": "India Tax Agent (CAClub)",
+  "description": "Indian tax compliance specialist - Income Tax, GST, TDS, Form 16, Section 44ADA, 80C",
+  "version": "1.0.0",
+  "jurisdiction": "india",
+  "capabilities": [
+    "income_tax",
+    "gst",
+    "tds",
+    "form_16",
+    "section_44ada",
+    "section_80c"
+  ],
+  "endpoint": "http://localhost:8001",
+  "language": "en"
+}

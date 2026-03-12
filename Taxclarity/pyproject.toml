@@ -1,0 +1,45 @@
+[project]
+name = "taxagent"
+version = "0.1.0"
+description = "Tax agent for cross-border tax queries using AI"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi[standard]>=0.135.1",
+    "google-adk[a2a]>=1.26.0",
+    "google-generativeai",
+    "google-genai",
+    "google-cloud-spanner",
+    "parsel>=1.11.0",
+    "praw>=7.8.1",
+    "requests>=2.32.5",
+    "scrapling[fetchers]>=0.4.1",
+    "structlog",
+    "uvicorn",
+    "python-dotenv",
+    "httpx",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+exclude = [
+    "frontend/",
+    "frontend-v2/",
+    "casemine_text/",
+    "indiankanoon_text/",
+    "dumps/",
+    "data/",
+    ".venv/",
+    "tests/manual/",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+addopts = "--import-mode=importlib"
+testpaths = ["tests"]
+asyncio_mode = "auto"
