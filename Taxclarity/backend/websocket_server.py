@@ -7,6 +7,7 @@ from typing import Any, AsyncGenerator, Optional
 
 import structlog
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from starlette.websockets import WebSocketState
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.live_orchestrator import run_live_query
@@ -97,6 +98,27 @@ def _is_low_quality_agent_text(text: str) -> bool:
         return True
 
     return False
+
+
+def _websocket_connected(websocket: WebSocket) -> bool:
+    return websocket.client_state == WebSocketState.CONNECTED
+
+
+async def _safe_send_json(
+    websocket: WebSocket,
+    payload: dict[str, Any],
+    *,
+    log_key: str = "websocket_send_not_deliverable",
+    **log_ctx: Any,
+) -> bool:
+    if not _websocket_connected(websocket):
+        return False
+    try:
+        await websocket.send_json(payload)
+        return True
+    except (WebSocketDisconnect, RuntimeError) as exc:
+        logger.warning(log_key, error=str(exc), **log_ctx)
+        return False
 
 
 def _select_final_agent_text(raw_text: str, tool_answer: str) -> str:
@@ -446,7 +468,7 @@ async def _forward_gemini_responses(
     current_agent_chunks: list[str] = []
     try:
         async for response in proxy.receive_response():
-            if websocket.client_state.value != 1:
+            if not _websocket_connected(websocket):
                 return
 
             server_content = getattr(response, "server_content", None)
@@ -454,7 +476,7 @@ async def _forward_gemini_responses(
                 if getattr(server_content, "interrupted", False):
                     current_agent_chunks = []
                     conversation_state["last_tool_answer"] = ""
-                    await websocket.send_json({"type": "interrupted"})
+                    await _safe_send_json(websocket, {"type": "interrupted"})
 
                 if getattr(server_content, "turn_complete", False):
                     finalized_agent_text = _select_final_agent_text(
@@ -476,7 +498,7 @@ async def _forward_gemini_responses(
                         conversation_state["last_agent_text"] = finalized_agent_text
                     current_agent_chunks = []
                     conversation_state["last_tool_answer"] = ""
-                    await websocket.send_json({"type": "turnComplete"})
+                    await _safe_send_json(websocket, {"type": "turnComplete"})
 
                 model_turn = getattr(server_content, "model_turn", None)
                 if model_turn:
@@ -485,7 +507,7 @@ async def _forward_gemini_responses(
                         if part_text:
                             current_agent_chunks.append(part_text)
                             if not _is_low_quality_agent_text(part_text):
-                                await websocket.send_json({
+                                await _safe_send_json(websocket, {
                                     "type": "text",
                                     "text": part_text,
                                 })
@@ -496,7 +518,7 @@ async def _forward_gemini_responses(
                             if audio_b64 is not None:
                                 if isinstance(audio_b64, bytes):
                                     audio_b64 = base64.b64encode(audio_b64).decode("utf-8")
-                                await websocket.send_json({
+                                await _safe_send_json(websocket, {
                                     "type": "audio",
                                     "data": audio_b64,
                                 })
@@ -529,8 +551,8 @@ async def _forward_gemini_responses(
                         )
                         conversation_state["last_user_text"] = query
 
-                    await websocket.send_json({"type": "user_text", "text": query})
-                    await websocket.send_json({"type": "thinking"})
+                    await _safe_send_json(websocket, {"type": "user_text", "text": query})
+                    await _safe_send_json(websocket, {"type": "thinking"})
                     routing_result = await process_voice_query(
                         query,
                         user_id=user_id,
@@ -546,7 +568,7 @@ async def _forward_gemini_responses(
                         "type": "content",
                         "content": routing_result.get("content", {}),
                     }
-                    await websocket.send_json(content_event)
+                    await _safe_send_json(websocket, content_event)
                     logger.info(
                         "routing_result_sent",
                         user_id=user_id,
@@ -651,27 +673,41 @@ def create_websocket_app() -> FastAPI:
                         _forward_gemini_responses(proxy, websocket, user_id, session_id, conversation_state)
                     )
 
-                    try:
-                        await websocket.send_json({"type": "reconnected"})
-                    except Exception:
-                        logger.warning("reconnect_notice_not_deliverable", reason=reason)
+                    await _safe_send_json(
+                        websocket,
+                        {"type": "reconnected"},
+                        log_key="reconnect_notice_not_deliverable",
+                        reason=reason,
+                    )
                     logger.info("gemini_session_reconnected", reason=reason)
                     return True
                 except Exception as exc:
                     logger.error("reconnect_attempt_failed", reason=reason, error=str(exc))
-                    try:
-                        await websocket.send_json({"type": "error", "message": f"Session reconnect failed: {exc}"})
-                    except Exception:
-                        logger.warning("reconnect_error_not_deliverable", reason=reason, error=str(exc))
+                    await _safe_send_json(
+                        websocket,
+                        {"type": "error", "message": f"Session reconnect failed: {exc}"},
+                        log_key="reconnect_error_not_deliverable",
+                        reason=reason,
+                        error=str(exc),
+                    )
                     return False
 
         try:
             session_started = False
-            async for raw_message in websocket.iter_text():
+            while True:
+                if not _websocket_connected(websocket):
+                    break
+                try:
+                    raw_message = await websocket.receive_text()
+                except WebSocketDisconnect:
+                    raise
+                except RuntimeError as exc:
+                    logger.info("websocket_receive_closed", error=str(exc))
+                    break
                 try:
                     data = json.loads(raw_message)
                 except json.JSONDecodeError:
-                    await websocket.send_json({"type": "error", "message": "Invalid JSON"})
+                    await _safe_send_json(websocket, {"type": "error", "message": "Invalid JSON"})
                     continue
 
                 msg_type = data.get("type")
@@ -734,9 +770,10 @@ def create_websocket_app() -> FastAPI:
                         session_started = True
                         logger.info("session_started", user_id=user_id, session_id=session_id)
 
-                        await websocket.send_json({"type": "connected"})
-                        await websocket.send_json(
-                            {"type": "memory_context", "memory_context": conversation_memory}
+                        await _safe_send_json(websocket, {"type": "connected"})
+                        await _safe_send_json(
+                            websocket,
+                            {"type": "memory_context", "memory_context": conversation_memory},
                         )
 
                         response_task = asyncio.create_task(
@@ -745,10 +782,12 @@ def create_websocket_app() -> FastAPI:
 
                     except Exception as exc:
                         logger.error("session_start_failed", error=str(exc), exc_info=True)
-                        try:
-                            await websocket.send_json({"type": "error", "message": str(exc)})
-                        except Exception:
-                            logger.warning("session_start_error_not_deliverable", error=str(exc))
+                        await _safe_send_json(
+                            websocket,
+                            {"type": "error", "message": str(exc)},
+                            log_key="session_start_error_not_deliverable",
+                            error=str(exc),
+                        )
                         continue
 
                 # ── Audio stream from browser mic ─────────────────────────
@@ -773,7 +812,10 @@ def create_websocket_app() -> FastAPI:
                     except Exception as exc:
                         proxy.session_alive = False
                         logger.warning("audio_send_failed", error=str(exc))
-                        await websocket.send_json({"type": "error", "message": f"Audio send failed: {exc}"})
+                        await _safe_send_json(
+                            websocket,
+                            {"type": "error", "message": f"Audio send failed: {exc}"},
+                        )
 
                 # ── Video frame from browser camera ───────────────────────
                 elif msg_type == "video":
@@ -789,7 +831,7 @@ def create_websocket_app() -> FastAPI:
                 # ── Text message from chat panel ──────────────────────────
                 elif msg_type == "text":
                     if not session_started:
-                        await websocket.send_json({"type": "error", "message": "Session not started"})
+                        await _safe_send_json(websocket, {"type": "error", "message": "Session not started"})
                         continue
                     try:
                         text = data.get("text", "")
@@ -814,7 +856,10 @@ def create_websocket_app() -> FastAPI:
                             conversation_state["last_user_text"] = clean_text
                     except Exception as exc:
                         logger.error("text_send_failed", error=str(exc))
-                        await websocket.send_json({"type": "error", "message": f"Text send failed: {exc}"})
+                        await _safe_send_json(
+                            websocket,
+                            {"type": "error", "message": f"Text send failed: {exc}"},
+                        )
 
                 # ── Interrupt (user speaking over AI) ─────────────────────
                 elif msg_type == "interrupt":
@@ -823,7 +868,7 @@ def create_websocket_app() -> FastAPI:
                         if response_task and not response_task.done():
                             response_task.cancel()
                         await proxy.close()
-                        await websocket.send_json({"type": "interrupted"})
+                        await _safe_send_json(websocket, {"type": "interrupted"})
                         # Reconnect for next turn
                         proxy._last_system_instruction = _compose_system_instruction(
                             conversation_state,
@@ -840,7 +885,7 @@ def create_websocket_app() -> FastAPI:
                     if response_task and not response_task.done():
                         response_task.cancel()
                     await proxy.close()
-                    await websocket.send_json({"type": "stopped"})
+                    await _safe_send_json(websocket, {"type": "stopped"})
                     break
 
         except WebSocketDisconnect:
@@ -852,10 +897,12 @@ def create_websocket_app() -> FastAPI:
                     logger.error("failed_to_close_memory_bank_session", error=str(exc))
         except Exception as exc:
             logger.error("websocket_handler_error", error=str(exc), exc_info=True)
-            try:
-                await websocket.send_json({"type": "error", "message": str(exc)})
-            except Exception:
-                logger.warning("websocket_error_not_deliverable", error=str(exc))
+            await _safe_send_json(
+                websocket,
+                {"type": "error", "message": str(exc)},
+                log_key="websocket_error_not_deliverable",
+                error=str(exc),
+            )
         finally:
             if response_task and not response_task.done():
                 response_task.cancel()
