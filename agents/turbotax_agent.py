@@ -9,6 +9,7 @@ import re
 import time
 import urllib.parse
 import urllib.request
+import logging
 from typing import Dict, List, Optional
 from urllib.parse import quote_plus
 
@@ -19,6 +20,8 @@ from scraping.utils import (
     page_text as _page_text_shared,
     page_html as _page_html_shared,
 )
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_TURBOTAX_URLS = [
     "https://turbotax.intuit.com/search/#?cludoquery=tax%20on%20hackathon%20winning&cludopage=1",
@@ -490,6 +493,15 @@ def main():
         method = "cludo"
         search_results = []
         cludo_debug = {}
+
+        if not config.get("customerId") or not config.get("engineId"):
+            logger.info(
+                "cludo_config_missing",
+                customer_id=bool(config.get("customerId")),
+                engine_id=bool(config.get("engineId")),
+                site_key=bool(config.get("siteKey")),
+                api_url=bool(config.get("searchApiUrl")),
+            )
 
         if config.get("customerId") and config.get("engineId"):
             search_results, cludo_debug = _fetch_cludo_search(

@@ -18,6 +18,7 @@ dependencies = [
     "uvicorn",
     "python-dotenv",
     "httpx",
+    "playwright>=1.58.0",
 ]
 
 [tool.ruff]

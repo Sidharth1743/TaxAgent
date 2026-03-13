@@ -425,7 +425,46 @@ def _extract_search_results(page) -> List[Dict[str, str]]:
         elif re.search(r"/judgements/|/judgement/", href):
             filtered.append(r)
 
-    return _dedupe_results(filtered)
+    filtered = _dedupe_results(filtered)
+    if filtered:
+        return filtered
+
+    # Fallback: extract known URL patterns from raw HTML/JS when results are rendered client-side.
+    html = ""
+    for attr in ("html", "content", "text", "page_source"):
+        if hasattr(page, attr):
+            value = getattr(page, attr)
+            if isinstance(value, bytes):
+                value = value.decode("utf-8", errors="ignore")
+            if isinstance(value, str) and value.strip():
+                html = value
+                break
+    if not html and hasattr(page, "response"):
+        resp = page.response
+        for attr in ("text", "content"):
+            if hasattr(resp, attr):
+                value = getattr(resp, attr)
+                if isinstance(value, bytes):
+                    value = value.decode("utf-8", errors="ignore")
+                if isinstance(value, str) and value.strip():
+                    html = value
+                    break
+    if not html:
+        return []
+
+    pattern = re.compile(
+        r"https?://(?:www\.)?taxtmi\.com/(?:forum/issue\\?id=\\d+|article/detailed\\?id=\\d+|news\\?id=\\d+|judgements?/[^\"'\\s>]+)",
+        re.I,
+    )
+    urls = []
+    seen = set()
+    for match in pattern.findall(html):
+        url = match.split("#", 1)[0]
+        if url in seen:
+            continue
+        seen.add(url)
+        urls.append({"title": url, "url": url})
+    return urls
 
 
 def _dedupe_results(results: List[Dict[str, str]]) -> List[Dict[str, str]]:

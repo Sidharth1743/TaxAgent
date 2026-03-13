@@ -63,6 +63,29 @@ MEMORY_BANK_ENDPOINT = os.getenv("MEMORY_BANK_ENDPOINT", "http://localhost:8080"
 MEMORY_SPANNER_DIRECT = os.getenv("MEMORY_SPANNER_DIRECT", "false").lower() == "true"
 
 # ---------------------------------------------------------------------------
+# User memory / SQL persistence configuration
+# ---------------------------------------------------------------------------
+MEMORY_PROVIDER = os.getenv("MEMORY_PROVIDER", "vertex_sql")
+USE_VERTEX_MEMORY = os.getenv("USE_VERTEX_MEMORY", "false").lower() == "true"
+USE_CLOUD_SQL_MEMORY = os.getenv("USE_CLOUD_SQL_MEMORY", "true").lower() == "true"
+DISABLE_SPANNER_MEMORY = os.getenv("DISABLE_SPANNER_MEMORY", "true").lower() == "true"
+DISABLE_PAGEINDEX = os.getenv("DISABLE_PAGEINDEX", "true").lower() == "true"
+SESSION_CACHE_TTL_MINUTES = int(os.getenv("SESSION_CACHE_TTL_MINUTES", "15"))
+MEMORY_TOPIC_LIMIT = int(os.getenv("MEMORY_TOPIC_LIMIT", "6"))
+MEMORY_RETRY_MAX_ATTEMPTS = int(os.getenv("MEMORY_RETRY_MAX_ATTEMPTS", "3"))
+MEMORY_RETRY_BASE_DELAY_SECONDS = float(os.getenv("MEMORY_RETRY_BASE_DELAY_SECONDS", "1.0"))
+MEMORY_JOB_MAX_CONCURRENCY = int(os.getenv("MEMORY_JOB_MAX_CONCURRENCY", "4"))
+
+# Generic SQLAlchemy URL. SQLite is the default local/dev backing store.
+CLOUD_SQL_DATABASE_URL = os.getenv("CLOUD_SQL_DATABASE_URL", "sqlite:///taxagent_memory.db")
+
+# Vertex Memory Bank configuration (optional; used only when USE_VERTEX_MEMORY=true)
+VERTEX_PROJECT_ID = os.getenv("VERTEX_PROJECT_ID", SPANNER_PROJECT_ID)
+VERTEX_LOCATION = os.getenv("VERTEX_LOCATION", "us-central1")
+VERTEX_REASONING_ENGINE_ID = os.getenv("VERTEX_REASONING_ENGINE_ID", "")
+VERTEX_MEMORY_APP_ID = os.getenv("VERTEX_MEMORY_APP_ID", "")
+
+# ---------------------------------------------------------------------------
 # PageIndex configuration
 # ---------------------------------------------------------------------------
 PAGEINDEX_API_KEY = os.getenv("PAGEINDEX_API_KEY", "")

@@ -138,12 +138,20 @@ export function extractSources(result: any): SourceItem[] {
 
   (result.claims || []).forEach((claim: any) => {
     if (!claim) return;
-    (claim.citations || []).forEach((url: string) => {
+    (claim.citations || []).forEach((citation: any) => {
+      const url =
+        typeof citation === "string"
+          ? citation
+          : citation?.url || citation?.link || citation?.href || "";
+      if (url && typeof url !== "string") return;
       items.push({
         id: String(counter++),
         title: claim.claim || claim.text || "",
-        url,
-        source: (result.sources || [])[0] || "",
+        url: url || "",
+        snippet: citation?.snippet || "",
+        date: citation?.date || "",
+        source: citation?.source || (result.sources || [])[0] || "",
+        replyCount: citation?.reply_count ?? citation?.replyCount,
       });
     });
   });

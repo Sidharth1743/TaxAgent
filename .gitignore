@@ -16,7 +16,7 @@ dumps/
 dumps_taxtmi/
 indiankanoon_text/
 casemine_text/
-
+Taxclarity/taxagent_memory.db
 # ADK session data
 agents/.adk/
 .adk

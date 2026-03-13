@@ -15,7 +15,10 @@ def main():
     sub.add_parser("graph-api", help="Start the Graph API server")
 
     scrape = sub.add_parser("scrape", help="Run a scraper directly")
-    scrape.add_argument("scraper", choices=["caclub", "taxtmi", "turbotax", "taxkanoon", "casemine"])
+    scrape.add_argument(
+        "scraper",
+        choices=["caclub", "taxtmi", "turbotax", "taxprofblog", "taxkanoon", "casemine"],
+    )
     scrape.add_argument("--query", required=True)
     scrape.add_argument("--max-links", type=int, default=5)
 
@@ -37,11 +40,14 @@ def main():
             "caclub": "agents/caclub_agent.py",
             "taxtmi": "agents/taxtmi_agent.py",
             "turbotax": "agents/turbotax_agent.py",
+            "taxprofblog": "agents/taxprofblog_agent.py",
             "taxkanoon": "scraping/taxkanoon.py",
             "casemine": "scraping/casemine.py",
         }
         script = os.path.join(root, scripts[args.scraper])
-        cmd = [sys.executable, script, "--query", args.query, "--max-links", str(args.max_links)]
+        cmd = [sys.executable, script, "--query", args.query]
+        if args.scraper != "casemine":
+            cmd.extend(["--max-links", str(args.max_links)])
         sys.exit(subprocess.call(cmd))
 
     else:

@@ -3,8 +3,11 @@
 
 import argparse
 import json
+import logging
+import os
 import re
 import time
+import urllib.request
 from typing import Dict, List, Optional, Tuple
 from urllib.parse import quote_plus
 
@@ -14,6 +17,7 @@ from scraping.utils import (
     fetch_with_fallbacks as _fetch_with_fallbacks_shared,
     is_blocked as _is_blocked_shared,
     page_text as _page_text_shared,
+    page_html as _page_html_shared,
 )
 
 DEFAULT_CACLUBINDIA_URLS = [
@@ -24,6 +28,19 @@ DEFAULT_CACLUBINDIA_URLS = [
     "https://www.caclubindia.com/articles/"
     "tax-rules-for-freelancers-in-fy-2025-26-53668.asp",
 ]
+
+logger = logging.getLogger(__name__)
+
+DEFAULT_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/123.0.0.0 Safari/537.36"
+    ),
+    "Accept-Language": "en-US,en;q=0.9",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Referer": "https://www.google.com/search?q=caclubindia",
+}
 
 
 def _page_text(page) -> str:
@@ -57,28 +74,11 @@ def _fetch_forum(url: str, mode: str, wait_selector: str = "body") -> Tuple[obje
 def _maybe_dump_html(page, url: str, dump_dir: Optional[str]) -> None:
     if not dump_dir:
         return
+    os.makedirs(dump_dir, exist_ok=True)
     safe = re.sub(r"[^a-zA-Z0-9]+", "_", url).strip("_")
     path = f"{dump_dir}/{safe}.html"
     try:
-        html = ""
-        for attr in ("html", "content", "text", "page_source"):
-            if hasattr(page, attr):
-                value = getattr(page, attr)
-                if isinstance(value, bytes):
-                    value = value.decode("utf-8", errors="ignore")
-                if isinstance(value, str) and value.strip():
-                    html = value
-                    break
-        if not html and hasattr(page, "response"):
-            resp = page.response
-            for attr in ("text", "content"):
-                if hasattr(resp, attr):
-                    value = getattr(resp, attr)
-                    if isinstance(value, bytes):
-                        value = value.decode("utf-8", errors="ignore")
-                    if isinstance(value, str) and value.strip():
-                        html = value
-                        break
+        html = _page_html_shared(page)
         with open(path, "w", encoding="utf-8") as f:
             f.write(html)
     except Exception:
@@ -127,25 +127,208 @@ def _extract_caclubindia_search(page) -> List[Dict[str, str]]:
                 "snippet": snippet or "",
             }
         )
+    if results:
+        return results
+    # Fallback: extract URLs from raw HTML if the CSE markup changed.
+    return _fallback_search_urls(page)
+
+
+def _extract_cse_cx(html: str) -> str:
+    if not html:
+        return ""
+    # Typical patterns in CSE embed.
+    patterns = [
+        r"cx\s*=\s*['\"]([a-z0-9:._-]+)['\"]",
+        r"data-cx=['\"]([a-z0-9:._-]+)['\"]",
+        r"google\.cse\.customSearchControl\s*\(\s*['\"]([a-z0-9:._-]+)['\"]",
+        r"cse\.js\?cx=([a-z0-9:._-]+)",
+    ]
+    for pat in patterns:
+        m = re.search(pat, html, re.I)
+        if m:
+            return m.group(1)
+    return ""
+
+
+def _parse_cse_response(text: str) -> List[Dict[str, str]]:
+    if not text:
+        return []
+    # CSE element API returns JS callback; extract JSON body.
+    start = text.find("{")
+    end = text.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        return []
+    try:
+        payload = json.loads(text[start : end + 1])
+    except Exception:
+        return []
+    results = []
+    for item in payload.get("results", []) or []:
+        url = item.get("url") or item.get("unescapedUrl") or ""
+        title = item.get("title") or ""
+        snippet = item.get("content") or ""
+        if url:
+            results.append({"title": title, "url": url, "snippet": snippet})
     return results
+
+
+def _extract_cse_tok(html: str) -> str:
+    if not html:
+        return ""
+    patterns = [
+        r"cse_tok=([a-zA-Z0-9._-]+)",
+        r"cse_token=([a-zA-Z0-9._-]+)",
+        r"cseTok['\"]?\s*[:=]\s*['\"]([a-zA-Z0-9._-]+)['\"]",
+    ]
+    for pat in patterns:
+        m = re.search(pat, html, re.I)
+        if m:
+            return m.group(1)
+    return ""
+
+
+def _fetch_cse_results(query: str, page, raw_html: str = "") -> List[Dict[str, str]]:
+    html = _html_text(page) or raw_html
+    cx = _extract_cse_cx(html)
+    if not cx:
+        logger.warning("caclub_cse_cx_not_found")
+        return []
+    cse_tok = _extract_cse_tok(html)
+    logger.info("caclub_cse_cx_found", cx=cx)
+    params = {
+        "rsz": "filtered_cse",
+        "num": "10",
+        "hl": "en",
+        "cx": cx,
+        "q": query,
+        "safe": "off",
+        "cse_tok": cse_tok,
+        "sort": "",
+        "exp": "",
+        "callback": "google.search.cse.api",
+        "start": "0",
+    }
+    qs = "&".join(f"{k}={quote_plus(v)}" for k, v in params.items() if v != "")
+    url = f"https://cse.google.com/cse/element/v1?{qs}"
+
+    # Try raw request with headers first (CSE often blocks generic clients).
+    try:
+        req = urllib.request.Request(url, headers=DEFAULT_HEADERS)
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = resp.read()
+        text = data.decode("utf-8", errors="ignore")
+        results = _parse_cse_response(text)
+        if results:
+            return results
+    except Exception as exc:
+        logger.warning("caclub_cse_request_failed: %s", exc)
+
+    # Optional: fallback to Google Programmable Search API if key provided.
+    api_key = os.getenv("GOOGLE_CSE_API_KEY", "")
+    if api_key:
+        api_url = (
+            "https://www.googleapis.com/customsearch/v1"
+            f"?key={quote_plus(api_key)}&cx={quote_plus(cx)}&q={quote_plus(query)}"
+        )
+        try:
+            req = urllib.request.Request(api_url, headers=DEFAULT_HEADERS)
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                data = resp.read()
+            payload = json.loads(data.decode("utf-8", errors="ignore"))
+            results = []
+            for item in payload.get("items", []) or []:
+                url = item.get("link") or ""
+                title = item.get("title") or ""
+                snippet = item.get("snippet") or ""
+                if url:
+                    results.append({"title": title, "url": url, "snippet": snippet})
+            return results
+        except Exception as exc:
+            logger.warning("caclub_cse_api_failed: %s", exc)
+
+    return []
+
+
+def _html_text(page) -> str:
+    for attr in ("html", "content", "text", "page_source"):
+        if hasattr(page, attr):
+            value = getattr(page, attr)
+            if isinstance(value, bytes):
+                value = value.decode("utf-8", errors="ignore")
+            if isinstance(value, str) and value.strip():
+                return value
+    if hasattr(page, "response"):
+        resp = page.response
+        for attr in ("text", "content"):
+            if hasattr(resp, attr):
+                value = getattr(resp, attr)
+                if isinstance(value, bytes):
+                    value = value.decode("utf-8", errors="ignore")
+                if isinstance(value, str) and value.strip():
+                    return value
+    return ""
+
+
+def _fetch_raw_html(url: str) -> str:
+    try:
+        req = urllib.request.Request(url, headers=DEFAULT_HEADERS)
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = resp.read()
+        return data.decode("utf-8", errors="ignore")
+    except Exception as exc:
+        logger.warning("caclub_raw_fetch_failed: %s", exc)
+        return ""
+
+
+def _fallback_search_urls(page) -> List[Dict[str, str]]:
+    html = _html_text(page)
+    if not html:
+        return []
+    pattern = re.compile(
+        r"https?://(?:www\.)?caclubindia\.com/(?:experts|forum|articles)/[^\s\"']+",
+        re.I,
+    )
+    urls = []
+    seen = set()
+    for match in pattern.findall(html):
+        url = match.split("#", 1)[0]
+        if url in seen:
+            continue
+        seen.add(url)
+        urls.append({"title": url, "url": url, "snippet": ""})
+    return urls
 
 
 def _build_search_url(query: str) -> str:
     return f"https://www.caclubindia.com/search_results_new.asp?q={quote_plus(query)}"
 
 
-def _fetch_search_with_fallbacks(query: str):
+def _fetch_search_with_fallbacks(query: str, dump_dir: Optional[str] = None):
     search_url = _build_search_url(query)
     wait_sel = ".gsc-resultsRoot, .gsc-webResult, .gs-webResult"
 
     # Try HTTP first.
-    page = Fetcher.get(search_url)
+    page = Fetcher.get(
+        search_url,
+        headers=DEFAULT_HEADERS,
+        stealthy_headers=True,
+        impersonate="chrome",
+        follow_redirects=True,
+    )
+    _maybe_dump_html(page, f"{search_url}#http", dump_dir)
     results = _extract_caclubindia_search(page)
     if results:
         return page, "http", results, search_url
 
     # Try dynamic.
-    page = DynamicFetcher.fetch(search_url, wait_selector=wait_sel, network_idle=True)
+    page = DynamicFetcher.fetch(
+        search_url,
+        wait_selector=wait_sel,
+        network_idle=True,
+        google_search=True,
+        extra_headers=DEFAULT_HEADERS,
+    )
+    _maybe_dump_html(page, f"{search_url}#dynamic", dump_dir)
     results = _extract_caclubindia_search(page)
     if results:
         return page, "dynamic", results, search_url
@@ -157,9 +340,26 @@ def _fetch_search_with_fallbacks(query: str):
         network_idle=True,
         solve_cloudflare=True,
         timeout=60000,
+        headers=DEFAULT_HEADERS,
+        google_search=True,
+        humanize=True,
     )
+    _maybe_dump_html(page, f"{search_url}#stealth", dump_dir)
     results = _extract_caclubindia_search(page)
-    return page, "stealth", results, search_url
+    if results:
+        return page, "stealth", results, search_url
+
+    # Final fallback: raw HTML fetch + CSE element API.
+    raw_html = _fetch_raw_html(search_url)
+    if dump_dir and raw_html:
+        try:
+            os.makedirs(dump_dir, exist_ok=True)
+            with open(os.path.join(dump_dir, "caclub_raw_http.html"), "w", encoding="utf-8") as f:
+                f.write(raw_html)
+        except Exception:
+            pass
+    cse_results = _fetch_cse_results(query, page, raw_html=raw_html)
+    return page, "cse_api", cse_results, search_url
 
 
 def _extract_caclubindia_article(page) -> Dict[str, str]:
@@ -636,7 +836,7 @@ def main():
 
     if args.query:
         page, method, search_results, search_url = _fetch_search_with_fallbacks(
-            args.query
+            args.query, dump_dir=args.dump_html
         )
         with open(args.search_out, "w", encoding="utf-8") as f:
             json.dump(

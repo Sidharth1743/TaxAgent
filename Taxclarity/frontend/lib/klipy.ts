@@ -5,7 +5,10 @@
 
 const BASE_URL =
   process.env.NEXT_PUBLIC_KLIPY_BASE_URL ?? "https://api.klipy.com/api/v1";
-const APP_KEY = process.env.NEXT_PUBLIC_KLIPY_APP_KEY ?? "";
+const APP_KEY =
+  process.env.NEXT_PUBLIC_KLIPY_APP_KEY ??
+  process.env.NEXT_PUBLIC_KLIPY_API_KEY ??
+  "";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -116,30 +119,56 @@ export function extractEmotion(text: string): EmotionResult {
 export function selectContent(
   emotion: Emotion,
   jurisdiction: Jurisdiction,
+  text: string,
+  opts?: { allowMeme?: boolean; allowSticker?: boolean; allowGif?: boolean; rng?: () => number },
 ): ContentRequest | null {
   if (emotion === "neutral") return null;
+  const lower = text.toLowerCase();
+  const allowMeme = opts?.allowMeme ?? true;
+  const allowSticker = opts?.allowSticker ?? true;
+  const allowGif = opts?.allowGif ?? true;
+  const rng = opts?.rng ?? Math.random;
 
-  const map: Record<Emotion, Partial<Record<Jurisdiction, ContentRequest>> & { any?: ContentRequest }> = {
-    celebration: {
+  // Decide format by context + a bit of randomness so it feels fresh.
+  // Memes: confusion/absurdity and text-heavy reactions.
+  // Stickers: short, friendly acknowledgements.
+  // GIFs: energetic or urgent reactions.
+  let preferred: ContentApi = "gifs";
+  if (emotion === "confusion" && allowMeme) {
+    preferred = "static-memes";
+  } else if (emotion === "resolved" && allowSticker && /thanks|got it|ok|okay|understood|cool|great/.test(lower)) {
+    preferred = "stickers";
+  } else if (emotion === "celebration" && allowGif) {
+    preferred = "gifs";
+  } else if (emotion === "urgency" && allowGif) {
+    preferred = "gifs";
+  } else if (allowSticker && rng() < 0.35) {
+    preferred = "stickers";
+  } else if (allowMeme && rng() < 0.2) {
+    preferred = "static-memes";
+  } else if (allowGif) {
+    preferred = "gifs";
+  }
+
+  const byType: Record<ContentApi, Partial<Record<Jurisdiction, ContentRequest>> & { any?: ContentRequest }> = {
+    "static-memes": {
       india: { api: "static-memes", query: "paisa hi paisa", locale: "in" },
+      us: { api: "static-memes", query: "math lady confused", locale: "us" },
+      global: { api: "static-memes", query: "math lady confused" },
+    },
+    stickers: {
+      india: { api: "stickers", query: "namaste thanks", locale: "in" },
+      us: { api: "stickers", query: "thumbs up thanks", locale: "us" },
+      global: { api: "stickers", query: "thumbs up thanks" },
+    },
+    gifs: {
+      india: { api: "gifs", query: "celebration success", locale: "in" },
       us: { api: "gifs", query: "money rain victory", locale: "us" },
       global: { api: "gifs", query: "victory dance celebration" },
     },
-    urgency: {
-      any: { api: "gifs", query: "running out of time panic" },
-    },
-    confusion: {
-      any: { api: "static-memes", query: "math lady confused" },
-    },
-    resolved: {
-      india: { api: "gifs", query: "namaste satisfied done", locale: "in" },
-      us: { api: "gifs", query: "problem solved yes", locale: "us" },
-      global: { api: "gifs", query: "mission accomplished" },
-    },
-    neutral: {},
   };
 
-  const entry = map[emotion];
+  const entry = byType[preferred];
   return (entry as any)[jurisdiction] ?? (entry as any).any ?? null;
 }
 
@@ -194,6 +223,23 @@ function extractMediaUrl(data: unknown): Pick<KlipyMedia, "url" | "format"> | nu
       const item = (data as any)?.items?.[0];
       return item?.url ? { url: item.url, format: item.format ?? "gif" } : undefined;
     },
+    // Pattern G: KLIPY v1 { data: [{ file: { sm: { gif: { url } } } }] }
+    () => {
+      const item = Array.isArray(data) ? (data[0] as any) : (data as any)?.data?.[0];
+      const file = item?.file;
+      if (!file) return undefined;
+      const sizes = ["md", "sm", "xs", "hd"];
+      const formats = ["gif", "webp", "png", "webm"];
+      for (const size of sizes) {
+        const bucket = file[size];
+        if (!bucket) continue;
+        for (const fmt of formats) {
+          const entry = bucket[fmt];
+          if (entry?.url) return { url: entry.url, format: fmt };
+        }
+      }
+      return undefined;
+    },
   ];
 
   for (const try_ of candidates) {
@@ -226,12 +272,19 @@ export async function fetchKlipyContent(
     return null;
   }
 
+  const formatFilter =
+    api === "static-memes"
+      ? "webp,png"
+      : api === "stickers"
+        ? "webp,gif,webm,png"
+        : "webp,gif,mp4,webm";
+
   const params = new URLSearchParams({
     q: query,
     customer_id: customerId,
     per_page: "1",
     content_filter: "medium",
-    format_filter: "webp,gif,png",
+    format_filter: formatFilter,
   });
   if (locale) params.set("locale", locale);
 

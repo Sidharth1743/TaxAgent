@@ -28,6 +28,7 @@ import {
   NetworkIcon,
   FileTextIcon,
   PanelRightIcon,
+  MicIcon,
 } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -78,6 +79,82 @@ function base64ToArrayBuffer(base64: string): ArrayBuffer {
   return bytes.buffer;
 }
 
+function extractCitationUrl(citation: any): string | null {
+  if (!citation) return null;
+  if (typeof citation === "string") return citation;
+  if (typeof citation === "object") {
+    return (
+      citation.url ||
+      citation.link ||
+      citation.href ||
+      null
+    );
+  }
+  return null;
+}
+
+type KlipyPayload = {
+  content_type?: "gif" | "meme" | "sticker" | "clip" | "none";
+  query?: string;
+  intensity?: "low" | "medium" | "high";
+  moment?: string;
+};
+
+function parseKlipyBlock(text: string): { cleanText: string; klipy: KlipyPayload | null } {
+  if (!text) return { cleanText: text, klipy: null };
+  const match = text.match(/<klipy>\s*([\s\S]*?)\s*<\/klipy>/i);
+  if (!match) return { cleanText: text, klipy: null };
+  const raw = match[1];
+  let parsed: KlipyPayload | null = null;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    parsed = null;
+  }
+  const cleanText = text.replace(match[0], "").trim();
+  return { cleanText, klipy: parsed };
+}
+
+function getTranscriptionText(msg: any, kind: "input" | "output"): string {
+  if (!msg) return "";
+  const direct = msg.content ?? msg.text ?? msg.transcript;
+  if (typeof direct === "string") return direct;
+  if (direct && typeof direct === "object") {
+    const inner = (direct as any).text ?? (direct as any).content;
+    if (typeof inner === "string") return inner;
+  }
+  const snake = msg?.[`${kind}_transcription`]?.text;
+  if (typeof snake === "string") return snake;
+  const serverSnake = msg?.server_content?.[`${kind}_transcription`]?.text;
+  if (typeof serverSnake === "string") return serverSnake;
+  const camelKey = kind === "input" ? "inputTranscription" : "outputTranscription";
+  const camel = msg?.serverContent?.[camelKey]?.text;
+  if (typeof camel === "string") return camel;
+  const nested = msg?.transcription?.text;
+  if (typeof nested === "string") return nested;
+  return "";
+}
+
+function mapKlipyRequest(payload: KlipyPayload | null): ContentRequest | null {
+  if (!payload) return null;
+  if (!payload.content_type || payload.content_type === "none") return null;
+  const query = (payload.query || "").trim();
+  if (!query) return null;
+  switch (payload.content_type) {
+    case "gif":
+      return { api: "gifs", query };
+    case "meme":
+      return { api: "static-memes", query };
+    case "sticker":
+      return { api: "stickers", query };
+    case "clip":
+      // Klipy doesn't support clips directly; fall back to GIFs.
+      return { api: "gifs", query };
+    default:
+      return null;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Main Component
 // ---------------------------------------------------------------------------
@@ -90,9 +167,13 @@ export function TaxClarityApp() {
   const [sources, setSources] = useState<SourceItem[]>([]);
   const [input, setInput] = useState("");
   const [voiceLevel, setVoiceLevel] = useState(0);
+  const [micLevel, setMicLevel] = useState(0);
   const [isListening, setIsListening] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [rightOpen, setRightOpen] = useState(true);
+  const [liveUserText, setLiveUserText] = useState("");
+  const [liveAgentText, setLiveAgentText] = useState("");
+  const [wsUrl] = useState(() => getWsUrl());
 
   // Refs
   const wsRef = useRef<WebSocket | null>(null);
@@ -103,59 +184,65 @@ export function TaxClarityApp() {
   const isPlayingRef = useRef(false);
   const currentAgentMsgIdRef = useRef<string | null>(null);
   const currentAgentTextRef = useRef<string>("");        // accumulates text for KLIPY (text + output_transcription)
+  const lastKlipyAtRef = useRef(0);
+  const micFrameCountRef = useRef(0);
+  const lastWsDropLogRef = useRef(0);
+  const userVoiceMsgIdRef = useRef<string | null>(null);
+  const userVoiceBufferRef = useRef<string>("");
+  const agentVoiceBufferRef = useRef<string>("");
+  const userVoiceDebounceRef = useRef<number | null>(null);
+  const inputTxLogRef = useRef(0);
+  const outputTxLogRef = useRef(0);
+  const rawTxLogRef = useRef(0);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const userId = useRef("user_" + Math.random().toString(36).slice(2, 8));
   const sessionId = useRef("session_" + Math.random().toString(36).slice(2, 10));
+  const msgSeqRef = useRef(0);
+  const turnSeqRef = useRef(0);
+  const currentTurnRef = useRef<string | null>(null);
+  const turnUserCommittedRef = useRef(false);
+  const turnAgentCommittedRef = useRef(false);
+  const currentAgentMsgAddedRef = useRef(false);
+
+  const nextMsgId = useCallback((prefix: string) => {
+    msgSeqRef.current += 1;
+    return `${prefix}_${Date.now()}_${msgSeqRef.current}`;
+  }, []);
+
+  const ensureTurn = useCallback(() => {
+    if (!currentTurnRef.current) {
+      turnSeqRef.current += 1;
+      currentTurnRef.current = `turn_${turnSeqRef.current}`;
+      turnUserCommittedRef.current = false;
+      turnAgentCommittedRef.current = false;
+      currentAgentMsgAddedRef.current = false;
+      // user voice is live-only, no persistent message until turnComplete
+      currentAgentMsgIdRef.current = null;
+      userVoiceMsgIdRef.current = null;
+      currentAgentTextRef.current = "";
+    }
+  }, []);
 
   // Scroll to bottom on new messages
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  useEffect(() => {
+    if (messages.length > 0) {
+      const ids = messages.map((m) => m.id);
+      const dupes = ids.filter((id, i) => ids.indexOf(id) !== i);
+      if (dupes.length) {
+        console.warn("[CHAT] duplicate ids", dupes);
+      }
+      console.log("[CHAT] messages", messages.length, ids);
+    }
+  }, [messages]);
+
   // ---------------------------------------------------------------------------
   // WebSocket
   // ---------------------------------------------------------------------------
-
-  const connect = useCallback(() => {
-    if (wsRef.current && wsRef.current.readyState <= WebSocket.OPEN) return;
-
-    const ws = new WebSocket(getWsUrl());
-    ws.binaryType = "arraybuffer";
-    wsRef.current = ws;
-
-    ws.onopen = () => {
-      setConnected(true);
-      setOrbState("idle");
-      ws.send(JSON.stringify({
-        type: "start",
-        session_id: sessionId.current,
-        user_id: userId.current,
-        voice: "Aoede",
-        response_modalities: ["AUDIO"],
-      }));
-    };
-
-    ws.onmessage = (event) => {
-      try {
-        handleServerMessage(JSON.parse(event.data));
-      } catch {}
-    };
-
-    ws.onclose = () => {
-      setConnected(false);
-      setOrbState("idle");
-      wsRef.current = null;
-      setTimeout(connect, 3000);
-    };
-
-    ws.onerror = () => setOrbState("error");
-  }, []);
-
-  useEffect(() => {
-    connect();
-    return () => { wsRef.current?.close(); };
-  }, [connect]);
 
   // ---------------------------------------------------------------------------
   // Server Message Handler
@@ -170,7 +257,7 @@ export function TaxClarityApp() {
     setMessages((prev) => {
       const id = currentAgentMsgIdRef.current;
       if (!id) {
-        const newId = "agent_" + Date.now();
+        const newId = nextMsgId("agent");
         currentAgentMsgIdRef.current = newId;
         return [...prev, { id: newId, role: "agent", content: text }];
       }
@@ -178,10 +265,36 @@ export function TaxClarityApp() {
     });
   }, []);
 
+  const setAgentLiveText = useCallback((text: string) => {
+    currentAgentTextRef.current = text;
+    setLiveAgentText(text);
+  }, []);
+
+  const setUserVoiceText = useCallback((text: string) => {
+    setLiveUserText(text);
+  }, []);
+
+  const finalizeUserVoice = useCallback(() => {
+    if (userVoiceDebounceRef.current) {
+      window.clearTimeout(userVoiceDebounceRef.current);
+      userVoiceDebounceRef.current = null;
+    }
+    const text = userVoiceBufferRef.current.trim();
+    if (text) {
+      setUserVoiceText(text);
+    }
+    userVoiceBufferRef.current = "";
+    userVoiceMsgIdRef.current = null;
+  }, [setUserVoiceText]);
+
   const handleServerMessage = useCallback((msg: any) => {
     switch (msg.type) {
       case "connected":
-        addMsg({ id: "sys_" + Date.now(), role: "system", content: `Connected to ${msg.model || "Gemini Live"}` });
+        addMsg({
+          id: nextMsgId("sys"),
+          role: "system",
+          content: `Connected to ${msg.model || "Gemini Live"}. Click the orb to enable the microphone.`,
+        });
         break;
 
       case "transcript": // partial streaming text — show immediately, don't wait
@@ -194,16 +307,45 @@ export function TaxClarityApp() {
 
       case "output_transcription":
         // Voice mode: agent spoke → transcription arrives here, not via "text"
-        // Only use the finished transcription to avoid duplicating partial chunks
-        if (msg.finished !== false) {
-          appendToAgent(msg.content);
+        {
+          ensureTurn();
+          const text = getTranscriptionText(msg, "output");
+          if (!text) {
+            if (outputTxLogRef.current < 3) {
+              outputTxLogRef.current += 1;
+              console.warn("[WS] output_transcription missing text", msg);
+            }
+            break;
+          }
+          if (outputTxLogRef.current < 3) {
+            outputTxLogRef.current += 1;
+            console.debug("[WS] output_transcription text", text);
+          }
+          // Accumulate chunks and commit on turnComplete.
+          agentVoiceBufferRef.current = (agentVoiceBufferRef.current + text).trimStart();
+          currentAgentTextRef.current = agentVoiceBufferRef.current;
+          setAgentLiveText(agentVoiceBufferRef.current);
         }
         break;
 
       case "input_transcription":
         // Voice mode: show what the user actually said
-        if (msg.finished !== false && msg.content?.trim()) {
-          addMsg({ id: "user_voice_" + Date.now(), role: "user", content: msg.content });
+        {
+          ensureTurn();
+          const text = getTranscriptionText(msg, "input");
+          if (!text || !text.trim()) {
+            if (inputTxLogRef.current < 3) {
+              inputTxLogRef.current += 1;
+              console.warn("[WS] input_transcription missing text", msg);
+            }
+            break;
+          }
+          if (inputTxLogRef.current < 3) {
+            inputTxLogRef.current += 1;
+            console.debug("[WS] input_transcription text", text);
+          }
+          userVoiceBufferRef.current = (userVoiceBufferRef.current + text).trimStart();
+          setUserVoiceText(userVoiceBufferRef.current);
         }
         break;
 
@@ -222,7 +364,7 @@ export function TaxClarityApp() {
         setOrbState("thinking");
         setIsLoading(true);
         addMsg({
-          id: "tool_" + Date.now(),
+          id: nextMsgId("tool"),
           role: "tool",
           content: `${msg.name}(${JSON.stringify(msg.args || {}).slice(0, 50)})`,
         });
@@ -235,7 +377,10 @@ export function TaxClarityApp() {
             setSources((prev) => [...prev, ...newSources]);
           }
           if (msg.content.claims && currentAgentMsgIdRef.current) {
-            const urls = (msg.content.claims as any[]).flatMap((c: any) => c.citations || []);
+            const urls = (msg.content.claims as any[])
+              .flatMap((c: any) => c.citations || [])
+              .map((c: any) => extractCitationUrl(c))
+              .filter((u: any) => typeof u === "string" && u.startsWith("http"));
             if (urls.length) {
               setMessages((prev) =>
                 prev.map((m) =>
@@ -252,38 +397,104 @@ export function TaxClarityApp() {
       case "turnComplete":
       case "turn_complete": {
         const completedMsgId = currentAgentMsgIdRef.current;
-        const completedText = currentAgentTextRef.current;
+        const completedText = currentAgentTextRef.current || agentVoiceBufferRef.current;
+        const { cleanText, klipy } = parseKlipyBlock(completedText);
+        agentVoiceBufferRef.current = "";
+        const finalUserText = userVoiceBufferRef.current.trim();
+        if (finalUserText && !turnUserCommittedRef.current) {
+          turnUserCommittedRef.current = true;
+          addMsg({ id: nextMsgId("user"), role: "user", content: finalUserText });
+        }
+        finalizeUserVoice();
+        setLiveAgentText("");
+        setLiveUserText("");
         // Reset refs before async work
         currentAgentMsgIdRef.current = null;
         currentAgentTextRef.current = "";
+        currentTurnRef.current = null;
         setIsLoading(false);
         setOrbState(isListening ? "listening" : "idle");
 
-        // Fire-and-forget KLIPY fetch — never blocks the chat
-        // Uses accumulated text (covers both text + output_transcription paths)
-        if (completedMsgId && completedText.trim()) {
-          const { emotion, jurisdiction } = extractEmotion(completedText);
-          const req = selectContent(emotion, jurisdiction);
-          if (req) {
-            fetchKlipyContent(req.api, req.query, req.locale, userId.current)
+        if (completedText.trim()) {
+          const ensuredMsgId = completedMsgId || ((): string => {
+            const newId = nextMsgId("agent");
+            currentAgentMsgIdRef.current = newId;
+            currentAgentMsgAddedRef.current = true;
+            setMessages((prev) => [...prev, { id: newId, role: "agent", content: completedText }]);
+            return newId;
+          })();
+          turnAgentCommittedRef.current = true;
+          if (!currentAgentMsgAddedRef.current) {
+            currentAgentMsgAddedRef.current = true;
+            setMessages((prev) => {
+              const exists = prev.some((m) => m.id === ensuredMsgId);
+              return exists ? prev : [...prev, { id: ensuredMsgId, role: "agent", content: completedText }];
+            });
+          }
+          // Strip <klipy> block from the displayed message.
+          if (cleanText && cleanText !== completedText) {
+            setMessages((msgs) =>
+              msgs.map((m) =>
+                m.id === ensuredMsgId ? { ...m, content: cleanText } : m,
+              ),
+            );
+          }
+
+          // Prefer explicit klipy payload if present.
+          const klipyReq = mapKlipyRequest(klipy);
+          if (klipyReq) {
+            fetchKlipyContent(klipyReq.api, klipyReq.query, klipyReq.locale, userId.current)
               .then((media) => {
                 if (!media) return;
+                lastKlipyAtRef.current = Date.now();
                 setMessages((msgs) =>
                   msgs.map((m) =>
-                    m.id === completedMsgId ? { ...m, media } : m,
+                    m.id === ensuredMsgId ? { ...m, media } : m,
                   ),
                 );
               });
+          } else {
+            // Fallback to emotion-based selection if no klipy block.
+            const { emotion, jurisdiction } = extractEmotion(completedText);
+            const now = Date.now();
+            const timeSinceLast = now - lastKlipyAtRef.current;
+            const longEnough = completedText.length >= 120;
+            const hasQuestion = completedText.includes("?");
+            const shouldConsider = emotion !== "neutral" && (longEnough || hasQuestion);
+            if (shouldConsider && timeSinceLast > 90_000) {
+              const probability = emotion === "celebration" ? 0.6
+                : emotion === "confusion" ? 0.45
+                : emotion === "urgency" ? 0.35
+                : emotion === "resolved" ? 0.25
+                : 0.0;
+              if (Math.random() < probability) {
+                const req = selectContent(emotion, jurisdiction, completedText);
+                if (req) {
+                  fetchKlipyContent(req.api, req.query, req.locale, userId.current)
+                    .then((media) => {
+                      if (!media) return;
+                      lastKlipyAtRef.current = Date.now();
+                      setMessages((msgs) =>
+                        msgs.map((m) =>
+                          m.id === ensuredMsgId ? { ...m, media } : m,
+                        ),
+                      );
+                    });
+                }
+              }
+            }
           }
         }
+        currentAgentMsgAddedRef.current = false;
         break;
       }
 
       case "interrupted":
-        currentAgentMsgIdRef.current = null;
-        currentAgentTextRef.current = "";
         setIsLoading(false);
         stopPlayback();
+        userVoiceBufferRef.current = "";
+        agentVoiceBufferRef.current = "";
+        userVoiceMsgIdRef.current = null;
         setOrbState("listening");
         break;
 
@@ -303,7 +514,69 @@ export function TaxClarityApp() {
         addMsg({ id: "err_" + Date.now(), role: "system", content: `Error: ${msg.message}` });
         break;
     }
-  }, [addMsg, appendToAgent, isListening]);
+  }, [addMsg, appendToAgent, isListening, setAgentLiveText, setUserVoiceText]);
+
+  // ---------------------------------------------------------------------------
+  // WebSocket
+  // ---------------------------------------------------------------------------
+
+  const connect = useCallback(() => {
+    if (wsRef.current && wsRef.current.readyState <= WebSocket.OPEN) return;
+
+    console.log("[WS] connecting", getWsUrl());
+    const ws = new WebSocket(getWsUrl());
+    ws.binaryType = "arraybuffer";
+    wsRef.current = ws;
+
+    ws.onopen = () => {
+      console.log("[WS] open");
+      setConnected(true);
+      setOrbState("idle");
+      ws.send(JSON.stringify({
+        type: "start",
+        session_id: sessionId.current,
+        user_id: userId.current,
+        voice: "Aoede",
+        response_modalities: ["AUDIO"],
+      }));
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const parsed = JSON.parse(event.data);
+        if (parsed?.type) {
+          console.log("[WS] message", parsed.type);
+          if ((parsed.type === "input_transcription" || parsed.type === "output_transcription") && rawTxLogRef.current < 4) {
+            rawTxLogRef.current += 1;
+            console.log("[WS] raw transcription payload", parsed);
+          }
+        }
+        handleServerMessage(parsed);
+        return;
+      } catch {}
+      try {
+        handleServerMessage(JSON.parse(event.data));
+      } catch {}
+    };
+
+    ws.onclose = () => {
+      console.warn("[WS] closed");
+      setConnected(false);
+      setOrbState("idle");
+      wsRef.current = null;
+      setTimeout(connect, 3000);
+    };
+
+    ws.onerror = (e) => {
+      console.error("[WS] error", e);
+      setOrbState("error");
+    };
+  }, [handleServerMessage]);
+
+  useEffect(() => {
+    connect();
+    return () => { wsRef.current?.close(); };
+  }, [connect]);
 
   // ---------------------------------------------------------------------------
   // Audio
@@ -312,16 +585,25 @@ export function TaxClarityApp() {
   const startMic = useCallback(async () => {
     if (micStreamRef.current) return;
     try {
+      console.log("[MIC] requesting permission");
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true, noiseSuppression: true },
       });
+      console.log("[MIC] permission granted");
       const ctx = new AudioContext({ sampleRate: 16000 });
       const source = ctx.createMediaStreamSource(stream);
       const proc = ctx.createScriptProcessor(4096, 1, 1);
 
       proc.onaudioprocess = (e) => {
         const ws = wsRef.current;
-        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+          const now = Date.now();
+          if (now - lastWsDropLogRef.current > 2000) {
+            lastWsDropLogRef.current = now;
+            console.warn("[MIC] audio dropped: ws not open");
+          }
+          return;
+        }
         const f32 = e.inputBuffer.getChannelData(0);
         const i16 = new Int16Array(f32.length);
         let sum = 0;
@@ -330,7 +612,13 @@ export function TaxClarityApp() {
           sum += f32[i] * f32[i];
         }
         ws.send(JSON.stringify({ type: "audio", data: arrayBufferToBase64(i16.buffer) }));
-        setVoiceLevel(Math.min(1, Math.sqrt(sum / f32.length) * 5));
+        const level = Math.min(1, Math.sqrt(sum / f32.length) * 5);
+        setVoiceLevel(level);
+        setMicLevel(level);
+        micFrameCountRef.current += 1;
+        if (micFrameCountRef.current % 50 === 0) {
+          console.log("[MIC] frames", micFrameCountRef.current, "level", level.toFixed(2));
+        }
       };
 
       source.connect(proc);
@@ -340,13 +628,15 @@ export function TaxClarityApp() {
       micProcRef.current = proc;
       setIsListening(true);
       setOrbState("listening");
-    } catch {
+    } catch (err) {
+      console.error("[MIC] start failed", err);
       setOrbState("error");
       addMsg({ id: "mic_err_" + Date.now(), role: "system", content: "Microphone denied. Use text input." });
     }
   }, [addMsg]);
 
   const stopMic = useCallback(() => {
+    console.log("[MIC] stop");
     micProcRef.current?.disconnect();
     micStreamRef.current?.getTracks().forEach((t) => t.stop());
     micCtxRef.current?.close();
@@ -354,6 +644,7 @@ export function TaxClarityApp() {
     micCtxRef.current = null;
     micProcRef.current = null;
     setIsListening(false);
+    setMicLevel(0);
     setOrbState("idle");
   }, []);
 
@@ -396,7 +687,7 @@ export function TaxClarityApp() {
 
   const sendText = useCallback((text: string) => {
     if (!text.trim()) return;
-    addMsg({ id: "user_" + Date.now(), role: "user", content: text });
+    addMsg({ id: nextMsgId("user"), role: "user", content: text });
     currentAgentMsgIdRef.current = null;
 
     const ws = wsRef.current;
@@ -435,7 +726,12 @@ export function TaxClarityApp() {
   }, [stopPlayback]);
 
   const handleOrbClick = useCallback(() => {
-    if (!connected) { connect(); return; }
+    if (!connected) {
+      // Prompt mic permission only on explicit user action.
+      startMic();
+      connect();
+      return;
+    }
     if (isListening) stopMic(); else startMic();
   }, [connected, connect, isListening, startMic, stopMic]);
 
@@ -453,7 +749,7 @@ export function TaxClarityApp() {
       if (!ws || ws.readyState !== WebSocket.OPEN) return;
       ws.send(JSON.stringify({ type: "video", data: b64, mime_type: file.type || "image/jpeg" }));
       ws.send(JSON.stringify({ type: "text", text: `I've uploaded a document (${file.name}). Please analyze it.` }));
-      addMsg({ id: "user_" + Date.now(), role: "user", content: `[Uploaded ${file.name}]` });
+      addMsg({ id: nextMsgId("user"), role: "user", content: `[Uploaded ${file.name}]` });
       setOrbState("thinking");
       setIsLoading(true);
     };
@@ -525,6 +821,18 @@ export function TaxClarityApp() {
 
             <div className="h-4 w-px bg-border" />
 
+            {/* Mic toggle */}
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={() => (isListening ? stopMic() : startMic())}
+              className={cn(isListening && "bg-emerald-500/10 text-emerald-400")}
+              title={isListening ? "Turn mic off" : "Turn mic on"}
+            >
+              <MicIcon className="size-4" />
+              <span className="sr-only">Toggle Microphone</span>
+            </Button>
+
             {/* Toggle right panel */}
             <Button
               variant="ghost"
@@ -544,7 +852,24 @@ export function TaxClarityApp() {
           <section className="flex-1 min-w-0 flex flex-col">
             {/* Orb */}
             <div className="flex justify-center py-5 shrink-0">
-              <VoiceOrb state={orbState} voiceLevel={voiceLevel} onClick={handleOrbClick} />
+              <div className="flex flex-col items-center gap-2">
+                <VoiceOrb state={orbState} voiceLevel={voiceLevel} onClick={handleOrbClick} />
+                {isListening ? (
+                  <div className="flex items-center gap-2 text-[10px] font-mono text-muted-foreground">
+                    <span>Mic</span>
+                    <div className="h-1.5 w-24 rounded-full bg-muted">
+                      <div
+                        className="h-1.5 rounded-full bg-emerald-400 transition-[width]"
+                        style={{ width: `${Math.min(100, Math.round(micLevel * 100))}%` }}
+                      />
+                    </div>
+                  </div>
+                ) : connected ? (
+                  <div className="text-[10px] font-mono text-muted-foreground">
+                    Mic off — click orb to enable
+                  </div>
+                ) : null}
+              </div>
             </div>
 
             {/* Chat */}
@@ -559,6 +884,24 @@ export function TaxClarityApp() {
                   {messages.map((m) => (
                     <MessageBubble key={m.id} message={m} onDismissMedia={handleDismissMedia} />
                   ))}
+                  {(liveUserText || liveAgentText) && (
+                    <div className="space-y-2">
+                      {liveUserText && (
+                        <div className="flex justify-end">
+                          <div className="max-w-[80%] px-3.5 py-2.5 text-sm leading-relaxed bg-secondary rounded-2xl rounded-br-md text-secondary-foreground opacity-90">
+                            <div className="whitespace-pre-wrap">{liveUserText}</div>
+                          </div>
+                        </div>
+                      )}
+                      {liveAgentText && (
+                        <div className="flex justify-start">
+                          <div className="max-w-[80%] px-3.5 py-2.5 text-sm leading-relaxed bg-card border border-border rounded-2xl rounded-bl-md text-card-foreground opacity-90">
+                            <div className="whitespace-pre-wrap">{liveAgentText}</div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
                   <div ref={chatEndRef} />
                 </div>
               )}
@@ -618,6 +961,7 @@ export function TaxClarityApp() {
           <div className="flex items-center gap-2 text-[10px] font-mono text-muted-foreground">
             <span>Gemini Live</span>
             <span className="size-0.5 rounded-full bg-muted-foreground/50" />
+            <span className="truncate max-w-[220px]">WS: {wsUrl}</span>
             <span>ADK</span>
             <span className="size-0.5 rounded-full bg-muted-foreground/50" />
             <span>Spanner</span>
