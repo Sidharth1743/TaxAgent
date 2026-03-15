@@ -28,6 +28,16 @@ class SessionState:
     last_reconnect_reason: str | None = None
     last_memory_write_status: str | None = None
     last_error: str | None = None
+    context_dispatched: bool = False
+    user_context: dict[str, str] = field(default_factory=dict)
+    memory_context: dict[str, Any] = field(default_factory=dict)
+    demo_mode: bool = False
+    demo_index: int = 0
+    demo_pending_text: str = ""
+    demo_pending_sent: bool = False
+    demo_finish_after_pending: bool = False
+    demo_allow_audio: bool = False
+    demo_final_pending: bool = False
     created_at: datetime = field(default_factory=_utcnow)
     updated_at: datetime = field(default_factory=_utcnow)
 

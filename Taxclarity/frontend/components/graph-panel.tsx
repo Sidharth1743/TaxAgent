@@ -27,14 +27,26 @@ interface GraphEdge {
   type: string;
 }
 
+export interface LiveGraphData {
+  nodes: GraphNode[];
+  edges: Array<{
+    from: string;
+    to: string;
+    type: string;
+  }>;
+}
+
 interface InspectedNode extends GraphNode {
   connections: string[];
 }
 
 export interface GraphPanelProps {
   userId?: string;
+  sessionId?: string;
   apiUrl: string;
   className?: string;
+  liveGraph?: LiveGraphData | null;
+  refreshToken?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -42,17 +54,17 @@ export interface GraphPanelProps {
 // ---------------------------------------------------------------------------
 
 const NODE_CFG: Record<string, { color: string; glow: string; label: string; desc: string }> = {
-  User:         { color: "#6366f1", glow: "rgba(99,102,241,0.45)",  label: "U", desc: "User Profile" },
-  Session:      { color: "#14b8a6", glow: "rgba(20,184,166,0.4)",   label: "S", desc: "Session" },
-  Query:        { color: "#22d3ee", glow: "rgba(34,211,238,0.4)",   label: "Q", desc: "Tax Query" },
-  Concept:      { color: "#f59e0b", glow: "rgba(245,158,11,0.4)",   label: "C", desc: "Tax Concept" },
-  TaxEntity:    { color: "#10b981", glow: "rgba(16,185,129,0.4)",   label: "E", desc: "Tax Entity" },
-  Resolution:   { color: "#a855f7", glow: "rgba(168,85,247,0.45)",  label: "R", desc: "Resolution" },
-  Jurisdiction: { color: "#ec4899", glow: "rgba(236,72,153,0.4)",   label: "J", desc: "Jurisdiction" },
-  TaxForm:      { color: "#818cf8", glow: "rgba(129,140,248,0.4)",  label: "F", desc: "Tax Form" },
-  Ambiguity:    { color: "#f43f5e", glow: "rgba(244,63,94,0.45)",   label: "!", desc: "Ambiguity" },
+  User:         { color: "#93c5fd", glow: "rgba(147,197,253,0.42)", label: "U", desc: "User Profile" },
+  Session:      { color: "#5eead4", glow: "rgba(94,234,212,0.38)",  label: "S", desc: "Session" },
+  Query:        { color: "#38bdf8", glow: "rgba(56,189,248,0.44)",  label: "Q", desc: "Tax Query" },
+  Concept:      { color: "#fbbf24", glow: "rgba(251,191,36,0.40)",  label: "C", desc: "Tax Concept" },
+  TaxEntity:    { color: "#34d399", glow: "rgba(52,211,153,0.38)",  label: "E", desc: "Tax Entity" },
+  Resolution:   { color: "#f59e0b", glow: "rgba(245,158,11,0.40)",  label: "R", desc: "Resolution" },
+  Jurisdiction: { color: "#fb7185", glow: "rgba(251,113,133,0.38)", label: "J", desc: "Jurisdiction" },
+  TaxForm:      { color: "#c4b5fd", glow: "rgba(196,181,253,0.38)", label: "F", desc: "Tax Form" },
+  Ambiguity:    { color: "#f87171", glow: "rgba(248,113,113,0.42)", label: "!", desc: "Ambiguity" },
 };
-const FALLBACK = { color: "#52525b", glow: "rgba(82,82,91,0.3)", label: "?", desc: "Unknown" };
+const FALLBACK = { color: "#94a3b8", glow: "rgba(148,163,184,0.28)", label: "?", desc: "Unknown" };
 const nc = (t: string) => NODE_CFG[t] || FALLBACK;
 
 const BASE_R = 9;
@@ -62,7 +74,7 @@ const MAX_EXTRA_R = 9; // degree can add up to 9px extra
 // Component
 // ---------------------------------------------------------------------------
 
-export function GraphPanel({ userId, apiUrl, className }: GraphPanelProps) {
+export function GraphPanel({ userId, sessionId, apiUrl, className, liveGraph, refreshToken }: GraphPanelProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const simRef = useRef<any>(null);
   const nodesRef = useRef<GraphNode[]>([]);
@@ -141,6 +153,13 @@ export function GraphPanel({ userId, apiUrl, className }: GraphPanelProps) {
         merge.append("feMergeNode").attr("in", "blur");
         merge.append("feMergeNode").attr("in", "SourceGraphic");
 
+        const softGlow = defs.append("filter").attr("id", "tc-soft-glow")
+          .attr("x", "-120%").attr("y", "-120%").attr("width", "340%").attr("height", "340%");
+        softGlow.append("feGaussianBlur").attr("in", "SourceGraphic").attr("stdDeviation", "9").attr("result", "blur");
+        const softMerge = softGlow.append("feMerge");
+        softMerge.append("feMergeNode").attr("in", "blur");
+        softMerge.append("feMergeNode").attr("in", "SourceGraphic");
+
         sel.append("g").attr("class", "tc-world");
 
         const zoom = d3.zoom<SVGSVGElement, unknown>()
@@ -181,16 +200,17 @@ export function GraphPanel({ userId, apiUrl, className }: GraphPanelProps) {
       linkSel.exit().remove();
       const linkEnter = linkSel.enter().append("line").attr("class", "tc-link")
         .attr("stroke-opacity", 0)
-        .attr("stroke-width", 1)
+        .attr("stroke-width", 1.15)
         .attr("stroke", (d) => {
           const tid = typeof d.target === "object" ? (d.target as GraphNode).type : "";
           return nc(tid).color;
         })
+        .attr("stroke-linecap", "round")
         .attr("marker-end", (d) => {
           const tid = typeof d.target === "object" ? (d.target as GraphNode).type : "";
           return `url(#arrow-${NODE_CFG[tid] ? tid : "Unknown"})`;
         });
-      linkEnter.transition().duration(500).attr("stroke-opacity", 0.2);
+      linkEnter.transition().duration(500).attr("stroke-opacity", 0.32);
       const linkAll = linkEnter.merge(linkSel as any);
 
       // ---- nodes ----
@@ -217,17 +237,18 @@ export function GraphPanel({ userId, apiUrl, className }: GraphPanelProps) {
         .attr("fill", "none")
         .attr("stroke", (d) => nc(d.type).color)
         .attr("stroke-width", 1)
-        .attr("stroke-opacity", 0.12)
-        .attr("filter", "url(#tc-glow)");
+        .attr("stroke-opacity", 0.2)
+        .attr("filter", "url(#tc-soft-glow)");
 
       // Inner filled circle
       nodeEnter.append("circle")
         .attr("class", "tc-body")
         .attr("r", (d) => BASE_R + Math.min((d.degree ?? 0) * 1.2, MAX_EXTRA_R))
         .attr("fill", (d) => nc(d.type).color)
-        .attr("fill-opacity", 0.13)
+        .attr("fill-opacity", 0.18)
         .attr("stroke", (d) => nc(d.type).color)
-        .attr("stroke-width", 1.5);
+        .attr("stroke-width", 1.6)
+        .attr("filter", "url(#tc-glow)");
 
       // Letter label
       nodeEnter.append("text")
@@ -245,7 +266,7 @@ export function GraphPanel({ userId, apiUrl, className }: GraphPanelProps) {
         .attr("text-anchor", "middle")
         .attr("dy", (d) => BASE_R + Math.min((d.degree ?? 0) * 1.2, MAX_EXTRA_R) + 12)
         .attr("font-size", 7)
-        .attr("fill", "oklch(0.48 0 0)")
+        .attr("fill", "rgba(226,232,240,0.72)")
         .attr("font-family", "var(--font-geist-mono), monospace")
         .text((d) => (d.label || d.id).slice(0, 20));
 
@@ -281,14 +302,14 @@ export function GraphPanel({ userId, apiUrl, className }: GraphPanelProps) {
         .on("mouseenter", function(this: SVGGElement, _, d) {
           d3.select(this).select(".tc-body")
             .transition().duration(150)
-            .attr("fill-opacity", 0.28)
-            .attr("stroke-width", 2);
+            .attr("fill-opacity", 0.32)
+            .attr("stroke-width", 2.2);
         })
         .on("mouseleave", function(this: SVGGElement) {
           d3.select(this).select(".tc-body")
             .transition().duration(150)
-            .attr("fill-opacity", 0.13)
-            .attr("stroke-width", 1.5);
+            .attr("fill-opacity", 0.18)
+            .attr("stroke-width", 1.6);
         });
 
       const nodeAll = nodeEnter.merge(nodeSel as any);
@@ -311,53 +332,68 @@ export function GraphPanel({ userId, apiUrl, className }: GraphPanelProps) {
   // Data fetch
   // ---------------------------------------------------------------------------
 
+  const applyGraphData = useCallback((data: { nodes?: any[]; edges?: any[]; links?: any[] }) => {
+    const oldMap = new Map(nodesRef.current.map((n) => [n.id, n]));
+    const prevIds = new Set(oldMap.keys());
+
+    nodesRef.current = (data.nodes || []).map((n: any) => {
+      const old = oldMap.get(n.id);
+      return {
+        id: n.id,
+        label: n.label || n.id,
+        type: n.type || "Unknown",
+        x: old?.x,
+        y: old?.y,
+        isNew: !prevIds.has(n.id),
+      };
+    });
+
+    const nodeIds = new Set(nodesRef.current.map((n) => n.id));
+    const rawEdges = data.edges || data.links || [];
+    linksRef.current = rawEdges
+      .filter((e: any) => nodeIds.has(e.from || e.source) && nodeIds.has(e.to || e.target))
+      .map((e: any) => ({
+        source: e.from || e.source,
+        target: e.to || e.target,
+        type: e.type || "",
+      }));
+
+    const s: Record<string, number> = {};
+    nodesRef.current.forEach((n) => { s[n.type] = (s[n.type] ?? 0) + 1; });
+    setStats(s);
+    setNodeCount(nodesRef.current.length);
+    setEdgeCount(linksRef.current.length);
+    renderGraph();
+  }, [renderGraph]);
+
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
+      if (liveGraph) {
+        applyGraphData(liveGraph);
+        return;
+      }
+      if (!apiUrl || !userId) {
+        applyGraphData({ nodes: [], edges: [] });
+        return;
+      }
       const params = new URLSearchParams();
-      if (userId) params.set("user_id", userId);
-      const resp = await fetch(`${apiUrl}/api/graph?${params.toString()}`);
+      params.set("user_id", userId);
+      if (sessionId) params.set("session_id", sessionId);
+      const resp = await fetch(`${apiUrl}/api/graph/${encodeURIComponent(userId)}?${params.toString()}`);
       const data = await resp.json();
-
-      const oldMap = new Map(nodesRef.current.map((n) => [n.id, n]));
-      const prevIds = new Set(oldMap.keys());
-
-      nodesRef.current = (data.nodes || []).map((n: any) => {
-        const old = oldMap.get(n.id);
-        return {
-          id: n.id,
-          label: n.label || n.id,
-          type: n.type || "Unknown",
-          x: old?.x,
-          y: old?.y,
-          isNew: !prevIds.has(n.id),
-        };
-      });
-
-      const nodeIds = new Set(nodesRef.current.map((n) => n.id));
-      linksRef.current = (data.edges || [])
-        .filter((e: any) => nodeIds.has(e.from) && nodeIds.has(e.to))
-        .map((e: any) => ({ source: e.from, target: e.to, type: e.type || "" }));
-
-      // Compute stats
-      const s: Record<string, number> = {};
-      nodesRef.current.forEach((n) => { s[n.type] = (s[n.type] ?? 0) + 1; });
-      setStats(s);
-      setNodeCount(nodesRef.current.length);
-      setEdgeCount(linksRef.current.length);
-
-      renderGraph();
+      applyGraphData(data);
     } catch {
       // graph API may not be running in dev
     } finally {
       setLoading(false);
     }
-  }, [userId, apiUrl, renderGraph]);
+  }, [apiUrl, applyGraphData, liveGraph, sessionId, userId]);
 
   useEffect(() => {
     renderGraph();
     refresh();
-  }, [renderGraph, refresh]);
+  }, [renderGraph, refresh, refreshToken]);
 
   // Re-render when filters change
   useEffect(() => {
@@ -369,13 +405,20 @@ export function GraphPanel({ userId, apiUrl, className }: GraphPanelProps) {
   // ---------------------------------------------------------------------------
 
   return (
-    <div className={cn("flex flex-col h-full bg-background overflow-hidden", className)}>
+    <div className={cn("relative flex flex-col h-full overflow-hidden rounded-[1.4rem] border border-white/10 bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.16),_transparent_32%),radial-gradient(circle_at_85%_20%,_rgba(251,191,36,0.12),_transparent_28%),linear-gradient(180deg,rgba(8,12,24,0.98),rgba(3,5,12,1))] shadow-[0_24px_80px_rgba(2,8,23,0.65)]", className)}>
+      <div className="pointer-events-none absolute inset-0 opacity-80">
+        <div className="absolute inset-x-0 top-0 h-24 bg-[linear-gradient(180deg,rgba(148,163,184,0.10),transparent)]" />
+        <div className="absolute inset-0 bg-[linear-gradient(rgba(148,163,184,0.045)_1px,transparent_1px),linear-gradient(90deg,rgba(148,163,184,0.04)_1px,transparent_1px)] bg-[size:28px_28px] opacity-[0.08]" />
+        <div className="absolute left-[-20%] top-24 h-48 w-48 rounded-full bg-cyan-400/12 blur-3xl" />
+        <div className="absolute right-[-15%] bottom-16 h-44 w-44 rounded-full bg-amber-400/10 blur-3xl" />
+        <div className="absolute left-[18%] bottom-10 h-32 w-32 rounded-full bg-emerald-400/8 blur-3xl" />
+      </div>
 
       {/* ── Stats row ── */}
-      <div className="flex items-center gap-3 px-3 py-2 border-b border-border flex-wrap shrink-0">
-        <div className="flex items-center gap-1.5 mr-1">
-          <NetworkIcon className="size-3 text-muted-foreground/60" />
-          <span className="text-[10px] font-mono text-muted-foreground">
+      <div className="relative flex items-center gap-3 px-3 py-2 border-b border-white/10 flex-wrap shrink-0 bg-black/10 backdrop-blur-md">
+        <div className="flex items-center gap-1.5 mr-1 rounded-full border border-cyan-400/15 bg-cyan-400/5 px-2 py-1">
+          <NetworkIcon className="size-3 text-cyan-200/70" />
+          <span className="text-[10px] font-mono text-slate-300">
             {nodeCount}N · {edgeCount}E
           </span>
         </div>
@@ -395,7 +438,7 @@ export function GraphPanel({ userId, apiUrl, className }: GraphPanelProps) {
           size="icon-xs"
           onClick={refresh}
           disabled={loading}
-          className="ml-auto text-muted-foreground shrink-0"
+          className="ml-auto shrink-0 border border-white/10 bg-white/5 text-slate-300 hover:bg-white/10"
           title="Refresh graph"
         >
           <RefreshCwIcon className={cn("size-3", loading && "animate-spin")} />
@@ -403,18 +446,18 @@ export function GraphPanel({ userId, apiUrl, className }: GraphPanelProps) {
       </div>
 
       {/* ── Search + type filter ── */}
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-border shrink-0">
+      <div className="relative flex items-center gap-2 px-3 py-2 border-b border-white/10 shrink-0 bg-black/10 backdrop-blur-md">
         <div className="relative flex-1">
-          <SearchIcon className="absolute left-2 top-1/2 -translate-y-1/2 size-3 text-muted-foreground/50 pointer-events-none" />
+          <SearchIcon className="absolute left-2 top-1/2 -translate-y-1/2 size-3 text-slate-400/60 pointer-events-none" />
           <input
             type="text"
             placeholder="Filter nodes…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className={cn(
-              "w-full pl-6 pr-2 py-1 text-[11px] font-mono bg-secondary/40 border border-border rounded",
-              "text-foreground placeholder:text-muted-foreground/40",
-              "focus:outline-none focus:border-ring/60 focus:bg-secondary/60",
+              "w-full rounded-xl border border-white/10 bg-white/5 pl-6 pr-2 py-1.5 text-[11px] font-mono",
+              "text-slate-100 placeholder:text-slate-400/55",
+              "focus:outline-none focus:border-cyan-300/45 focus:bg-white/8",
               "transition-colors"
             )}
           />
@@ -423,7 +466,7 @@ export function GraphPanel({ userId, apiUrl, className }: GraphPanelProps) {
 
       {/* ── Type filter chips ── */}
       {presentTypes.length > 0 && (
-        <div className="flex flex-wrap gap-1.5 px-3 py-2 border-b border-border shrink-0">
+        <div className="flex flex-wrap gap-1.5 px-3 py-2 border-b border-white/10 shrink-0 bg-black/5">
           {presentTypes.map((t) => {
             const active = activeTypes.has(t);
             return (
@@ -438,12 +481,12 @@ export function GraphPanel({ userId, apiUrl, className }: GraphPanelProps) {
                   });
                 }}
                 className={cn(
-                  "flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-mono border transition-all",
+                  "flex items-center gap-1 rounded-full px-2.5 py-1 text-[9px] font-mono border transition-all",
                   active
-                    ? "border-current/40 bg-current/10"
-                    : "border-border/40 bg-transparent opacity-35"
+                    ? "border-current/35 bg-white/8 shadow-[0_0_0_1px_rgba(255,255,255,0.02)]"
+                    : "border-white/10 bg-transparent opacity-45"
                 )}
-                style={active ? { color: nc(t).color } : { color: nc(t).color }}
+                style={active ? { color: nc(t).color, boxShadow: `0 0 18px ${nc(t).glow}` } : { color: nc(t).color }}
                 title={nc(t).desc}
               >
                 <span
@@ -457,7 +500,7 @@ export function GraphPanel({ userId, apiUrl, className }: GraphPanelProps) {
           {activeTypes.size < presentTypes.length && (
             <button
               onClick={() => setActiveTypes(new Set(Object.keys(NODE_CFG)))}
-              className="px-2 py-0.5 text-[9px] font-mono text-muted-foreground border border-dashed border-border/60 rounded hover:border-border transition-colors"
+              className="rounded-full border border-dashed border-white/15 px-2.5 py-1 text-[9px] font-mono text-slate-400 transition-colors hover:border-white/25"
             >
               show all
             </button>
@@ -466,7 +509,7 @@ export function GraphPanel({ userId, apiUrl, className }: GraphPanelProps) {
       )}
 
       {/* ── SVG canvas ── */}
-      <div ref={containerRef} className="flex-1 relative overflow-hidden">
+        <div ref={containerRef} className="relative flex-1 overflow-hidden">
         <svg
           ref={svgRef}
           className="w-full h-full cursor-grab active:cursor-grabbing"
@@ -476,8 +519,8 @@ export function GraphPanel({ userId, apiUrl, className }: GraphPanelProps) {
         {/* Empty state */}
         {nodeCount === 0 && !loading && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 pointer-events-none">
-            <NetworkIcon className="size-8 text-muted-foreground/20" />
-            <p className="text-[11px] font-mono text-muted-foreground/40 text-center px-4">
+            <NetworkIcon className="size-8 text-slate-500/25" />
+            <p className="px-4 text-center text-[11px] font-mono text-slate-400/45">
               Knowledge graph builds as you<br />have conversations
             </p>
           </div>
@@ -488,7 +531,7 @@ export function GraphPanel({ userId, apiUrl, className }: GraphPanelProps) {
           <div
             className={cn(
               "absolute top-3 right-3 w-52 rounded-lg border border-border bg-card/90 backdrop-blur-md",
-              "shadow-lg shadow-black/30 animate-fade-in overflow-hidden"
+              "overflow-hidden border-white/10 bg-slate-950/88 shadow-lg shadow-black/30 animate-fade-in"
             )}
           >
             {/* Header */}

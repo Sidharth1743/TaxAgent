@@ -1,13 +1,14 @@
 #!/bin/bash
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
-PYTHON="$ROOT/.venv/bin/python"
+PYTHON="/home/sidharth/Desktop/TaxAgent/.venv/bin/python"
 PIDFILE="$ROOT/.pids"
 PORTS=(8000 8001 8002 8003 8004 8005 8006)
+PROXY_BIN="$ROOT/bin/cloud-sql-proxy"
 
 if [ ! -f "$PYTHON" ]; then
-    echo "ERROR: .venv not found."
-    echo "Run: python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt"
+    echo "ERROR: root venv not found at /home/sidharth/Desktop/TaxAgent/.venv"
+    echo "Run: python3 -m venv /home/sidharth/Desktop/TaxAgent/.venv && source /home/sidharth/Desktop/TaxAgent/.venv/bin/activate && pip install -r requirements.txt"
     exit 1
 fi
 
@@ -18,6 +19,12 @@ if [ -f "$PIDFILE" ]; then
 fi
 
 : > "$PIDFILE"
+
+if [ -f "$ROOT/.env" ]; then
+    set -a
+    source "$ROOT/.env"
+    set +a
+fi
 
 if command -v lsof >/dev/null 2>&1; then
     in_use=0
@@ -58,6 +65,17 @@ echo ""
 echo ""
 echo "Starting backend servers..."
 echo ""
+
+if [[ "$CLOUD_SQL_DATABASE_URL" == *"127.0.0.1"* || "$CLOUD_SQL_DATABASE_URL" == *"localhost"* ]]; then
+    if [ -x "$PROXY_BIN" ] && [ -n "$CLOUD_SQL_INSTANCE_CONNECTION_NAME" ]; then
+        PROXY_PORT="${CLOUD_SQL_PROXY_PORT:-5432}"
+        echo "Starting Cloud SQL Auth Proxy → $CLOUD_SQL_INSTANCE_CONNECTION_NAME (port $PROXY_PORT)"
+        "$PROXY_BIN" --port "$PROXY_PORT" "$CLOUD_SQL_INSTANCE_CONNECTION_NAME" &
+        echo $! >> "$PIDFILE"
+    else
+        echo "Cloud SQL proxy not started (missing $PROXY_BIN or CLOUD_SQL_INSTANCE_CONNECTION_NAME)."
+    fi
+fi
 
 echo "Starting WebSocket Server → http://localhost:8003"
 run_server_bg "WebSocket Server" 8003 "backend.websocket_server:app"

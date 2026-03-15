@@ -40,10 +40,7 @@ export function KlipyMediaCard({ media, onDismiss }: KlipyMediaCardProps) {
         />
       )}
 
-      {/* Caption */}
-      <div className="px-2 py-1 bg-black/30">
-        <p className="text-[9px] font-mono text-white/50 truncate">{media.alt}</p>
-      </div>
+      {/* Caption intentionally hidden to avoid noisy repetition in chat */}
     </div>
   );
 }

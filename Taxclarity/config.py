@@ -35,6 +35,7 @@ EXTRACTOR_MODEL = os.getenv("EXTRACTOR_MODEL", "gemini-3.1-flash-lite-preview")
 
 # Voice — Gemini Live native audio model for bidi audio + video.
 VOICE_MODEL = os.getenv("VOICE_MODEL", "gemini-2.5-flash-native-audio-preview-12-2025")
+TTS_MODEL = os.getenv("TTS_MODEL", "gemini-2.5-flash-preview-tts")
 
 # ---------------------------------------------------------------------------
 # Shared secrets
@@ -101,6 +102,7 @@ CLUDO_ENGINE_ID = os.getenv("CLUDO_ENGINE_ID", "")
 # Logging configuration
 # ---------------------------------------------------------------------------
 LOG_FORMAT = os.getenv("LOG_FORMAT", "console")  # "console" for dev, "json" for production
+
 
 
 def configure_logging():

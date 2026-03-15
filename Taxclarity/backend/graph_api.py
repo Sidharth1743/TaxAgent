@@ -20,6 +20,7 @@ configure_logging()
 
 from agents.calculation_agent import compute_tax_liability  # noqa: E402
 from backend.document_extractor import ExtractedDocument, extract_document  # noqa: E402
+from backend.obsidian_graph import build_obsidian_graph  # noqa: E402
 from memory.memory_service import get_memory_service  # noqa: E402
 from memory.spanner_graph import analyze_insights, fetch_user_graph  # noqa: E402
 
@@ -176,8 +177,27 @@ class InsightItem(BaseModel):
 # ---------------------------------------------------------------------------
 
 @app.get("/api/graph/{user_id}", response_model=GraphResponse)
-async def get_user_graph(user_id: str):
+async def get_user_graph(user_id: str, session_id: Optional[str] = None):
     """Return D3-compatible graph data for a user."""
+    obsidian_result = build_obsidian_graph(user_id, session_id=session_id)
+    if session_id is not None:
+        return GraphResponse(nodes=obsidian_result["nodes"], links=[
+            {
+                "source": edge["from"],
+                "target": edge["to"],
+                "type": edge["type"],
+            }
+            for edge in obsidian_result["edges"]
+        ])
+    if obsidian_result.get("nodes"):
+        return GraphResponse(nodes=obsidian_result["nodes"], links=[
+            {
+                "source": edge["from"],
+                "target": edge["to"],
+                "type": edge["type"],
+            }
+            for edge in obsidian_result["edges"]
+        ])
     graph_db = get_graph_database()
     if graph_db is not None:
         result = fetch_user_graph(graph_db, user_id)

@@ -9,8 +9,8 @@ import "./globals.css";
 const inter = Inter({ subsets: ["latin"], variable: "--font-sans" });
 
 export const metadata: Metadata = {
-  title: "TaxClarity — AI Tax Advisor",
-  description: "Voice-first AI tax advisor. See, Hear, Speak — tax advice without borders.",
+  title: "Saul Goodman — AI Tax Advisor",
+  description: "Voice-first AI tax advisor. See, hear, speak — tax guidance without borders.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
