@@ -1,14 +1,26 @@
 #!/bin/bash
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
-PYTHON="/home/sidharth/Desktop/TaxAgent/.venv/bin/python"
 PIDFILE="$ROOT/.pids"
 PORTS=(8000 8001 8002 8003 8004 8005 8006)
 PROXY_BIN="$ROOT/bin/cloud-sql-proxy"
 
+if [ -n "$PYTHON_BIN" ]; then
+    PYTHON="$PYTHON_BIN"
+elif [ -n "$VENV_PATH" ] && [ -x "$VENV_PATH/bin/python" ]; then
+    PYTHON="$VENV_PATH/bin/python"
+elif [ -x "$ROOT/.venv/bin/python" ]; then
+    PYTHON="$ROOT/.venv/bin/python"
+elif [ -x "/home/sidharth/Desktop/TaxAgent/.venv/bin/python" ]; then
+    PYTHON="/home/sidharth/Desktop/TaxAgent/.venv/bin/python"
+else
+    PYTHON="$(command -v python3 || true)"
+fi
+
 if [ ! -f "$PYTHON" ]; then
-    echo "ERROR: root venv not found at /home/sidharth/Desktop/TaxAgent/.venv"
-    echo "Run: python3 -m venv /home/sidharth/Desktop/TaxAgent/.venv && source /home/sidharth/Desktop/TaxAgent/.venv/bin/activate && pip install -r requirements.txt"
+    echo "ERROR: python interpreter not found."
+    echo "Set PYTHON_BIN=/path/to/python or VENV_PATH=/path/to/venv."
+    echo "Example: python3 -m venv /opt/saulgoodman/venv && source /opt/saulgoodman/venv/bin/activate && pip install -r requirements.txt"
     exit 1
 fi
 

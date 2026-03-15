@@ -1,0 +1,38 @@
+name: Deploy Backend To GCE VM
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "Taxclarity/**"
+      - ".github/workflows/deploy-backend-vm.yml"
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VM_SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H "${{ secrets.VM_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Sync repository to VM
+        run: |
+          rsync -az --delete \
+            --exclude ".git" \
+            --exclude "Taxclarity/.venv" \
+            --exclude "Taxclarity/frontend/node_modules" \
+            --exclude "Taxclarity/data" \
+            ./ "${{ secrets.VM_USER }}@${{ secrets.VM_HOST }}:/opt/saulgoodman/repo/"
+
+      - name: Deploy on VM
+        run: |
+          ssh "${{ secrets.VM_USER }}@${{ secrets.VM_HOST }}" \
+            "cd /opt/saulgoodman/repo && APP_ROOT=/opt/saulgoodman/repo VENV_PATH=/opt/saulgoodman/venv BRANCH=main bash Taxclarity/deploy/vm/deploy_backend.sh"
