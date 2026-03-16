@@ -31,7 +31,7 @@ export interface EmotionResult {
   jurisdiction: Jurisdiction;
 }
 
-interface ContentRequest {
+export interface ContentRequest {
   api: ContentApi;
   query: string;
   locale?: string;

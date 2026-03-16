@@ -22,7 +22,7 @@ import {
   SidebarTrigger,
 } from "@/components/ui/sidebar";
 import { cn } from "@/lib/utils";
-import { extractEmotion, selectContent, fetchKlipyContent, type KlipyMedia } from "@/lib/klipy";
+import { extractEmotion, selectContent, fetchKlipyContent, type KlipyMedia, type ContentRequest } from "@/lib/klipy";
 import { KlipyMediaCard } from "@/components/ui/klipy-media";
 import {
   NetworkIcon,
