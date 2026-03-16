@@ -7,6 +7,7 @@ VENV_PATH="${VENV_PATH:-/opt/saulgoodman/venv}"
 BRANCH="${BRANCH:-main}"
 
 cd "$APP_ROOT"
+git config --global --add safe.directory "$APP_ROOT"
 git fetch --all --prune
 git checkout "$BRANCH"
 git reset --hard "origin/$BRANCH"
