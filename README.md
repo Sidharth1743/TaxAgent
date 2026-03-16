@@ -19,55 +19,7 @@ TaxClarity is an AI-powered tax advisory system that aggregates evidence from mu
 
 ## Architecture
 
-```
-                                    +-------------------+
-                                    |   Browser Client  |
-                                    |  (Next.js SPA)    |
-                                    +--------+----------+
-                                             |
-                                    WebSocket (PCM audio + JSON)
-                                             |
-                                    +--------v----------+
-                                    |  WebSocket Server |
-                                    |     :8003         |
-                                    +--------+----------+
-                                             |
-                            +----------------+----------------+
-                            |                 |                |
-                    Gemini Live API    Function Calls      Tool Bridge
-                            |                 |                |
-                            v                 v                v
-                   +--------+----+   +-------+------+  +------v-------+
-                   | Root Agent |   | Memory Tools |  | Legal Enrich |
-                   |   :8000    |   | (Spanner)   |  | (Kanoon/Casemine)
-                   +----+----+----+   +-------------+  +--------------+
-                        |    |    |
-           +------------+    |    +------------+
-           |                 |                 |
-           v                 v                 v
-    +------+------+   +------+------+   +------+--------+
-    | CAClub     |   | TaxTMI    |   | TurboTax     |
-    | :8001      |   | :8002     |   | :8005        |
-    +------+------+   +------+------+   +------+--------+
-           |                 |                 |
-           v                 v                 v
-    +------+------+   +------+------+   +------+--------+
-    | caclub_    |   | taxtmi_   |   | turbotax_    |
-    | agent.py   |   | agent.py  |   | agent.py     |
-    +------+------+   +------+------+   +------+--------+
-           |                 |                 |
-           +-----------------+-----------------+
-                            |
-                   Web Scraping (HTTP/Playwright/Stealth)
-                            |
-           +----------------+----------------+
-           |                |                |
-           v                v                v
-    +-------------+  +-------------+  +-------------+
-    | CAClubIndia |  | TaxTMI.com |  | TurboTax   |
-    | .com        |  |            |  | .intuit.com|
-    +-------------+  +-------------+  +-------------+
-```
+![Architecture](./Architecture.png)
 
 ### Component Roles
 
