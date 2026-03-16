@@ -52,10 +52,8 @@ The flow is:
 ## Related Repository for Document Vision
 
 The document vision pipeline lives in a separate repository:
-
-```
 https://github.com/LE-TAPU-KOKO/Saul
-```
+
 
 ## Project Structure
 
