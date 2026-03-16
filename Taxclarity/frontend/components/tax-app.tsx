@@ -575,7 +575,7 @@ export function SaulGoodmanApp() {
             const urls = (msg.content.claims as any[])
               .flatMap((c: any) => c.citations || [])
               .map((c: any) => extractCitationUrl(c))
-              .filter((u: any) => typeof u === "string" && u.startsWith("http"));
+              .filter((u): u is string => typeof u === "string" && u.startsWith("http"));
             if (urls.length) {
               setMessages((prev) =>
                 prev.map((m) =>
