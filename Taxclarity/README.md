@@ -160,7 +160,6 @@ TaxClarity/
 │   ├── e2e/                     # End-to-end tests
 │   └── manual/                  # Manual tests
 │
-├── demo/                         # Demo conversation logs
 │
 └── New_vertex/                   # Alternative vertex implementation
 ```

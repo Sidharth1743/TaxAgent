@@ -217,8 +217,6 @@ export function SaulGoodmanApp() {
   const [liveUserText, setLiveUserText] = useState("");
   const [liveAgentText, setLiveAgentText] = useState("");
   const [wsUrl] = useState(() => getWsUrl());
-  const [demoMode, setDemoMode] = useState(false);
-  const [demoReady, setDemoReady] = useState(false);
 
   // Refs
   const wsRef = useRef<WebSocket | null>(null);
@@ -228,23 +226,17 @@ export function SaulGoodmanApp() {
   const playQueueRef = useRef<ArrayBuffer[]>([]);
   const isPlayingRef = useRef(false);
   const currentAgentMsgIdRef = useRef<string | null>(null);
-  const currentAgentTextRef = useRef<string>("");        // accumulates text for KLIPY (text + output_transcription)
+  const currentAgentTextRef = useRef<string>("");        // accumulates text for KLIPY + transcription
   const lastKlipyAtRef = useRef(0);
   const micFrameCountRef = useRef(0);
   const lastWsDropLogRef = useRef(0);
-  const userVoiceMsgIdRef = useRef<string | null>(null);
   const userVoiceBufferRef = useRef<string>("");
   const agentVoiceBufferRef = useRef<string>("");
-  const userVoiceDebounceRef = useRef<number | null>(null);
   const inputTxLogRef = useRef(0);
   const outputTxLogRef = useRef(0);
   const rawTxLogRef = useRef(0);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const demoRecRef = useRef<any>(null);
-  const demoTranscriptRef = useRef<string>("");
-  const demoSilenceTimerRef = useRef<number | null>(null);
-  const demoLastCommitRef = useRef<string>("");
   const userId = useRef<string>("");
   const sessionId = useRef<string>("");
   const msgSeqRef = useRef(0);
@@ -287,9 +279,7 @@ export function SaulGoodmanApp() {
       turnUserCommittedRef.current = false;
       turnAgentCommittedRef.current = false;
       currentAgentMsgAddedRef.current = false;
-      // user voice is live-only, no persistent message until turnComplete
       currentAgentMsgIdRef.current = null;
-      userVoiceMsgIdRef.current = null;
       currentAgentTextRef.current = "";
     }
   }, []);
@@ -345,99 +335,6 @@ export function SaulGoodmanApp() {
     setLiveUserText(text);
   }, []);
 
-  const finalizeUserVoice = useCallback(() => {
-    if (userVoiceDebounceRef.current) {
-      window.clearTimeout(userVoiceDebounceRef.current);
-      userVoiceDebounceRef.current = null;
-    }
-    const text = userVoiceBufferRef.current.trim();
-    if (text) {
-      setUserVoiceText(text);
-    }
-    userVoiceBufferRef.current = "";
-    userVoiceMsgIdRef.current = null;
-  }, [setUserVoiceText]);
-
-  const scheduleDemoCommit = useCallback(() => {
-    if (demoSilenceTimerRef.current) {
-      window.clearTimeout(demoSilenceTimerRef.current);
-    }
-    demoSilenceTimerRef.current = window.setTimeout(() => {
-      if (isLoading) {
-        scheduleDemoCommit();
-        return;
-      }
-      const text = demoTranscriptRef.current.trim();
-      if (!text || text === demoLastCommitRef.current) return;
-      demoLastCommitRef.current = text;
-      addMsg({ id: nextMsgId("user"), role: "user", content: text });
-      demoTranscriptRef.current = "";
-      setUserVoiceText("");
-      const ws = wsRef.current;
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: "text", text }));
-        setOrbState("thinking");
-        setIsLoading(true);
-      }
-    }, 2000);
-  }, [addMsg, isLoading, setUserVoiceText]);
-
-  const startDemoRecognition = useCallback(() => {
-    if (demoRecRef.current) return;
-    const SpeechRecognition: any =
-      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      console.warn("[DEMO] SpeechRecognition not available");
-      return;
-    }
-    const rec = new SpeechRecognition();
-    rec.continuous = true;
-    rec.interimResults = true;
-    rec.lang = "en-US";
-    rec.onresult = (event: any) => {
-      let finalText = "";
-      let interimText = "";
-      for (let i = event.resultIndex; i < event.results.length; i += 1) {
-        const result = event.results[i];
-        const transcript = result[0]?.transcript || "";
-        if (result.isFinal) finalText += transcript;
-        else interimText += transcript;
-      }
-      if (finalText) {
-        demoTranscriptRef.current = (demoTranscriptRef.current + " " + finalText).trim();
-      }
-      const live = (demoTranscriptRef.current + " " + interimText).trim();
-      if (live) {
-        setUserVoiceText(live);
-        scheduleDemoCommit();
-      }
-    };
-    rec.onend = () => {
-      if (demoMode && isListening) {
-        try { rec.start(); } catch {}
-      }
-    };
-    rec.onerror = (e: any) => {
-      console.warn("[DEMO] speech recognition error", e?.error || e);
-    };
-    demoRecRef.current = rec;
-    try { rec.start(); } catch {}
-  }, [demoMode, isListening, scheduleDemoCommit, setUserVoiceText]);
-
-  const stopDemoRecognition = useCallback(() => {
-    const rec = demoRecRef.current;
-    if (rec) {
-      try { rec.onresult = null; rec.onend = null; rec.stop(); } catch {}
-    }
-    demoRecRef.current = null;
-    demoTranscriptRef.current = "";
-    if (demoSilenceTimerRef.current) {
-      window.clearTimeout(demoSilenceTimerRef.current);
-      demoSilenceTimerRef.current = null;
-    }
-    setUserVoiceText("");
-  }, []);
-
   const handleServerMessage = useCallback((msg: any) => {
     switch (msg.type) {
       case "connected":
@@ -451,27 +348,17 @@ export function SaulGoodmanApp() {
         }
         break;
 
-      case "demo_mode":
-        setDemoMode(Boolean(msg.enabled));
-        setDemoReady(Boolean(msg.enabled));
-        break;
-
       case "transcript": // partial streaming text — show immediately, don't wait
       case "text": {
         setOrbState("speaking");
         setIsLoading(true);
-        setUserVoiceText("");
         const chunk = msg.text || msg.content || "";
         appendToAgent(chunk);
         break;
       }
 
       case "output_transcription":
-        // Voice mode: agent spoke → transcription arrives here, not via "text"
         {
-          if (demoMode) {
-            break;
-          }
           ensureTurn();
           const text = getTranscriptionText(msg, "output");
           if (!text) {
@@ -485,7 +372,6 @@ export function SaulGoodmanApp() {
             outputTxLogRef.current += 1;
             console.debug("[WS] output_transcription text", text);
           }
-          // Accumulate chunks and commit on turnComplete.
           agentVoiceBufferRef.current = (agentVoiceBufferRef.current + text).trimStart();
           currentAgentTextRef.current = agentVoiceBufferRef.current;
           setAgentLiveText(agentVoiceBufferRef.current);
@@ -493,12 +379,7 @@ export function SaulGoodmanApp() {
         break;
 
       case "input_transcription":
-        // Voice mode: show what the user actually said
         {
-          if (demoMode) {
-            userVoiceBufferRef.current = "";
-            break;
-          }
           ensureTurn();
           const text = getTranscriptionText(msg, "input");
           if (!text || !text.trim()) {
@@ -602,15 +483,15 @@ export function SaulGoodmanApp() {
         const completedText = currentAgentTextRef.current || agentVoiceBufferRef.current;
         const { cleanText, klipy } = parseKlipyBlock(completedText);
         const sanitizedText = stripKlipyNoise(cleanText, klipy);
-        agentVoiceBufferRef.current = "";
-        const finalUserText = demoMode ? "" : userVoiceBufferRef.current.trim();
+        const finalUserText = userVoiceBufferRef.current.trim();
         if (finalUserText && !turnUserCommittedRef.current) {
           turnUserCommittedRef.current = true;
           addMsg({ id: nextMsgId("user"), role: "user", content: finalUserText });
         }
-        finalizeUserVoice();
         setLiveAgentText("");
         setLiveUserText("");
+        userVoiceBufferRef.current = "";
+        agentVoiceBufferRef.current = "";
         // Reset refs before async work
         currentAgentMsgIdRef.current = null;
         currentAgentTextRef.current = "";
@@ -695,9 +576,6 @@ export function SaulGoodmanApp() {
       case "interrupted":
         setIsLoading(false);
         stopPlayback();
-        userVoiceBufferRef.current = "";
-        agentVoiceBufferRef.current = "";
-        userVoiceMsgIdRef.current = null;
         setOrbState("listening");
         break;
 
@@ -717,7 +595,7 @@ export function SaulGoodmanApp() {
         addMsg({ id: nextMsgId("err"), role: "system", content: `Error: ${msg.message}` });
         break;
     }
-  }, [addMsg, appendToAgent, demoMode, ensureTurn, finalizeUserVoice, isListening, nextMsgId, setAgentLiveText, setUserVoiceText]);
+  }, [addMsg, appendToAgent, ensureTurn, isListening, nextMsgId, setAgentLiveText, setUserVoiceText]);
 
   useEffect(() => {
     handleServerMessageRef.current = handleServerMessage;
@@ -769,7 +647,6 @@ export function SaulGoodmanApp() {
     ws.onclose = () => {
       console.warn("[WS] closed");
       setConnected(false);
-      setDemoReady(false);
       setOrbState("idle");
       wsRef.current = null;
       if (connectTimerRef.current) {
@@ -793,14 +670,6 @@ export function SaulGoodmanApp() {
       wsRef.current?.close();
     };
   }, [connect]);
-
-  useEffect(() => {
-    if (demoMode && demoReady && isListening && !isLoading) {
-      startDemoRecognition();
-      return;
-    }
-    stopDemoRecognition();
-  }, [demoMode, demoReady, isListening, isLoading, startDemoRecognition, stopDemoRecognition]);
 
   // ---------------------------------------------------------------------------
   // Audio
@@ -835,8 +704,7 @@ export function SaulGoodmanApp() {
           i16[i] = Math.max(-32768, Math.min(32767, Math.floor(f32[i] * 32767)));
           sum += f32[i] * f32[i];
         }
-        const payload = demoMode ? new Int16Array(i16.length) : i16;
-        ws.send(JSON.stringify({ type: "audio", data: arrayBufferToBase64(payload.buffer) }));
+        ws.send(JSON.stringify({ type: "audio", data: arrayBufferToBase64(i16.buffer) }));
         const level = Math.min(1, Math.sqrt(sum / f32.length) * 5);
         setVoiceLevel(level);
         setMicLevel(level);
@@ -853,13 +721,12 @@ export function SaulGoodmanApp() {
       micProcRef.current = proc;
       setIsListening(true);
       setOrbState("listening");
-      if (demoMode && demoReady) startDemoRecognition();
     } catch (err) {
       console.error("[MIC] start failed", err);
       setOrbState("error");
       addMsg({ id: "mic_err_" + Date.now(), role: "system", content: "Microphone denied. Use text input." });
     }
-  }, [addMsg, demoMode, demoReady, startDemoRecognition]);
+  }, [addMsg]);
 
   const stopMic = useCallback(() => {
     console.log("[MIC] stop");
@@ -872,8 +739,7 @@ export function SaulGoodmanApp() {
     setIsListening(false);
     setMicLevel(0);
     setOrbState("idle");
-    stopDemoRecognition();
-  }, [stopDemoRecognition]);
+  }, []);
 
   const handleAudioOutput = useCallback((buf: ArrayBuffer) => {
     playQueueRef.current.push(buf);
@@ -1116,7 +982,7 @@ export function SaulGoodmanApp() {
                   {messages.map((m) => (
                     <MessageBubble key={m.id} message={m} onDismissMedia={handleDismissMedia} />
                   ))}
-                  {(!demoMode && (liveUserText || liveAgentText)) && (
+                  {(liveUserText || liveAgentText) && (
                     <div className="space-y-2">
                       {liveUserText && (
                         <div className="flex justify-end">

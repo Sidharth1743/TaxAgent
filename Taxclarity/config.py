@@ -29,13 +29,12 @@ GRAPH_API_PORT = int(os.getenv("GRAPH_API_PORT", "8006"))
 # ---------------------------------------------------------------------------
 # Text agents — Gemini 3.1 Flash Lite Preview (4/500 RPD — verified available)
 SOURCE_AGENT_MODEL = os.getenv("SOURCE_AGENT_MODEL", "gemini-3.1-flash-lite-preview")
-ROOT_AGENT_MODEL = os.getenv("ROOT_AGENT_MODEL", "gemini-3.1-flash-lite-preview")
+ROOT_AGENT_MODEL = os.getenv("ROOT_AGENT_MODEL", "gemini-3.1-pro-preview")
 GEO_ROUTER_MODEL = os.getenv("GEO_ROUTER_MODEL", "gemini-3.1-flash-lite-preview")
 EXTRACTOR_MODEL = os.getenv("EXTRACTOR_MODEL", "gemini-3.1-flash-lite-preview")
 
 # Voice — Gemini Live native audio model for bidi audio + video.
 VOICE_MODEL = os.getenv("VOICE_MODEL", "gemini-2.5-flash-native-audio-preview-12-2025")
-TTS_MODEL = os.getenv("TTS_MODEL", "gemini-2.5-flash-preview-tts")
 
 # ---------------------------------------------------------------------------
 # Shared secrets

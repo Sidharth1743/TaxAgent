@@ -17,7 +17,7 @@ from backend.live_orchestrator import run_live_query
 from backend.live_orchestrator import merge_evidence_into_claims
 from backend.obsidian_graph import persist_turn_to_obsidian
 from backend.session_state import SessionState, SessionStateStore
-from config import GOOGLE_API_KEY, SESSION_CACHE_TTL_MINUTES, TTS_MODEL, VOICE_MODEL
+from config import GOOGLE_API_KEY, SESSION_CACHE_TTL_MINUTES, VOICE_MODEL
 from memory.memory_service import get_memory_service
 
 logger = structlog.get_logger(__name__)
@@ -170,44 +170,6 @@ RIGHT opening:  "Hey! Before I can actually help,
 We are going to use the Vertex AI Memory Bank for the whole system and
 Spanner Graph only for visualizing in the knowledge graph right now.
 We can remove Spanner Graph if we don't need it in future.
-We are going to do two demo scenarios for the hackathon:
-
-════════════════════════════════════════
-SCENARIO 1: NRI RELOCATION PLAYBOOK
-════════════════════════════════════════
-
-Trigger: User mentions moving back to India,
-         returning NRI, retirement in India,
-         relocating from US/abroad
-
-Key concepts to cover (in this order, naturally):
-1. Residential status change — 182 day rule,
-   RNOR grace period (max 2-3 years benefit)
-2. Global income taxability post-return
-3. US portfolio strategy — sell before vs after relocation,
-   LTCG rate differential (US 20% vs India slab 30%)
-4. NRE account transition —
-   NRE → RFC or Resident account,
-   FD interest tax-free now, taxable post-return
-5. DTAA India-US — Form 67 for foreign tax credit
-6. Pre-return checklist —
-   180-day planning, asset restructuring,
-   HUF consideration for large families
-7. Son's education corpus — Section 80E,
-   tax-efficient instruments
-
-Tone for this scenario:
-Calm, structured, slightly impressed by the corpus size,
-focused on making them feel in control not overwhelmed.
-This user has a LOT to lose from bad timing.
-Make the urgency real but not scary.
-
-Personality moments to hit:
-- React to "early retirement in Kerala" with genuine warmth
-- When revealing global income taxability —
-  be direct but immediately follow with DTAA relief
-- When giving the pre-return checklist —
-  make it feel like a game plan, not a burden
 
 ════════════════════════════════════════
 RESPONSE STRUCTURE RULES
@@ -299,34 +261,6 @@ Intensity rules:
            peak moments only (max 2 per session)
 
 ════════════════════════════════════════
-EXAMPLE TURN — SCENARIO 1
-════════════════════════════════════════
-
-User: "We have about $1M in US markets and
-       ₹7-8 crore in India."
-
-Response:
-"Okay so we are genuinely not playing around here 💰
-That's a serious corpus across two jurisdictions —
-and honestly this is exactly the situation where
-getting the timing right before 2028 can save you
-crores, not lakhs.
-
-One thing I need to understand before we get into
-strategy — are you familiar at all with how Indian
-taxation works? Like have you ever filed an ITR,
-or is this all new territory?"
-
-<klipy>
-{
-  "content_type": "meme",
-  "query": "rich people problems we are not the same",
-  "intensity": "high",
-  "moment": "large_portfolio_reveal"
-}
-</klipy>
-
-════════════════════════════════════════
 MEMORY CONTEXT INJECTION
 ════════════════════════════════════════
 
@@ -377,25 +311,13 @@ Continue the current conversation naturally.
 """.strip()
 
 REAL_MODE_RULES = """
-REAL MODE (non-demo):
+REAL MODE:
 - Ask at most 5 short questions total to gather context.
 - Prioritize: location, motive/goal, portfolio/savings, family, problem.
 - After you have enough context, stop asking questions and move to action.
 - Keep it warm, energetic, not robotic.
 - Never say "welcome back" unless memory_context.prior_sessions > 0 AND memory_context.loaded is true.
 """.strip()
-
-DEMO_MODE_RULES = """
-DEMO MODE:
-- Every text input you receive is a line to speak aloud verbatim.
-- Speak exactly and only that text. Do not add, remove, paraphrase, or explain.
-- Do not provide extra commentary or questions.
-""".strip()
-
-DEMO_MODE = os.getenv("DEMO_MODE", "false").lower() == "true"
-DEMO_SCENARIO_PATH = os.getenv("DEMO_SCENARIO_PATH", "").strip()
-
-
 def _format_klipy_block(kind: str, query: str) -> str:
     content_type = kind.lower()
     intensity = "low"
@@ -411,185 +333,6 @@ def _format_klipy_block(kind: str, query: str) -> str:
         "moment": moment,
     }
     return "<klipy>\n" + json.dumps(payload, ensure_ascii=False, indent=2) + "\n</klipy>"
-
-
-def _load_demo_script(path: str) -> list[dict[str, str]]:
-    if not path or not os.path.exists(path):
-        return []
-    turns: list[dict[str, str]] = []
-    with open(path, "r", encoding="utf-8") as handle:
-        lines = [line.rstrip("\n") for line in handle]
-    pending_user: str | None = None
-    i = 0
-    while i < len(lines):
-        line = lines[i].strip()
-        user_match = re.match(r"^USER\s*:?\s*(.*)$", line, flags=re.IGNORECASE)
-        if user_match:
-            pending_user = user_match.group(1).strip()
-            i += 1
-            continue
-        if line.startswith("SAUL GOODMAN:"):
-            text = line.split("SAUL GOODMAN:", 1)[1].strip()
-            klipy_block = ""
-            if i + 1 < len(lines):
-                next_line = lines[i + 1].strip()
-                match = re.match(r'^\[KLIPY:\s*([^→]+)→\s*"([^"]+)"\s*\]$', next_line)
-                if match:
-                    kind = match.group(1).strip().lower()
-                    query = match.group(2).strip()
-                    klipy_block = _format_klipy_block(kind, query)
-                    i += 1
-            if klipy_block:
-                text = f"{text}\n{klipy_block}"
-            turns.append({"user_text": pending_user or "", "assistant_text": text})
-            pending_user = None
-        i += 1
-    return turns
-
-
-DEMO_TURNS = _load_demo_script(DEMO_SCENARIO_PATH) if DEMO_MODE else []
-async def _dispatch_demo_turn(
-    *,
-    websocket: WebSocket,
-    proxy: "GeminiLiveProxy",
-    state: SessionState,
-    user_text: str = "",
-) -> None:
-    if not state.demo_mode or not DEMO_TURNS:
-        return
-
-    if state.demo_index < len(DEMO_TURNS):
-        turn = DEMO_TURNS[state.demo_index]
-        state.demo_index += 1
-        state.demo_pending_sent = False
-        state.demo_allow_audio = True
-        state.touch()
-
-        clean_user_text = _normalize_text(user_text)
-        if clean_user_text:
-            _append_ephemeral_turn(state, "user", clean_user_text)
-            _update_user_context(state, clean_user_text)
-            _schedule_turn_persist(
-                state=state,
-                role="user",
-                text=clean_user_text,
-            )
-            state.last_user_text = clean_user_text
-            state.current_topics = (state.current_topics + [clean_user_text[:120]])[-6:]
-            state.touch()
-
-        demo_text = turn.get("assistant_text", "")
-        state.demo_pending_text = demo_text
-        state.demo_pending_sent = True
-        state.demo_allow_audio = False
-        state.touch()
-        await _emit_demo_tts_turn(websocket=websocket, proxy=proxy, text=demo_text)
-        finalized_agent_text = _normalize_text(_strip_klipy_from_text(demo_text))
-        if finalized_agent_text:
-            _append_ephemeral_turn(state, "agent", finalized_agent_text)
-            _schedule_turn_persist(
-                state=state,
-                role="agent",
-                text=finalized_agent_text,
-                refresh_summary=True,
-            )
-            state.last_agent_text = finalized_agent_text
-            state.current_topics = (state.current_topics + [finalized_agent_text[:120]])[-6:]
-            state.touch()
-        state.demo_pending_text = ""
-        state.demo_pending_sent = False
-        state.touch()
-        # Old Gemini Live recitation path kept for fallback/reference.
-        # spoken = _strip_klipy_from_text(demo_text)
-        # if spoken:
-        #     await proxy.send_text(spoken)
-
-    if state.demo_index >= len(DEMO_TURNS) and not state.context_dispatched and not state.demo_final_pending:
-        state.context_dispatched = True
-        state.demo_final_pending = True
-        state.touch()
-        await _safe_send_json(websocket, {"type": "thinking"})
-        asyncio.create_task(_dispatch_demo_final(websocket=websocket, proxy=proxy, state=state))
-
-
-async def _dispatch_demo_final(
-    *,
-    websocket: WebSocket,
-    proxy: "GeminiLiveProxy",
-    state: SessionState,
-) -> None:
-    await asyncio.sleep(30)
-    evidence = DEMO_EVIDENCE
-    claims = merge_evidence_into_claims(evidence)
-    source_statuses = [
-        {
-            "source": item.get("source"),
-            "label": item.get("source"),
-            "status": "success",
-            "evidence_count": 1,
-        }
-        for item in evidence
-    ]
-    content = {
-        "query": "NRI relocation tax planning",
-        "jurisdiction": "cross-border",
-        "sources": list({item.get("source") for item in evidence}),
-        "claims": claims,
-        "contradictions": [],
-        "source_statuses": source_statuses,
-        "synthesized_response": _build_demo_response(state),
-    }
-    await _safe_send_json(websocket, {"type": "content", "content": content})
-    await _safe_send_json(websocket, {
-        "type": "tool_call",
-        "name": "agent_status",
-        "args": {"statuses": source_statuses},
-    })
-    final_text = content["synthesized_response"]
-    state.demo_pending_text = final_text
-    state.demo_pending_sent = True
-    state.demo_finish_after_pending = True
-    state.demo_allow_audio = False
-    state.demo_final_pending = False
-    state.demo_index = len(DEMO_TURNS)
-    state.touch()
-    await _emit_demo_tts_turn(websocket=websocket, proxy=proxy, text=final_text)
-    finalized_agent_text = _normalize_text(_strip_klipy_from_text(final_text))
-    if finalized_agent_text:
-        _append_ephemeral_turn(state, "agent", finalized_agent_text)
-        _schedule_turn_persist(
-            state=state,
-            role="agent",
-            text=finalized_agent_text,
-            refresh_summary=True,
-        )
-        state.last_agent_text = finalized_agent_text
-        state.current_topics = (state.current_topics + [finalized_agent_text[:120]])[-6:]
-        state.touch()
-    state.demo_pending_text = ""
-    state.demo_pending_sent = False
-    state.demo_finish_after_pending = False
-    state.demo_mode = False
-    state.touch()
-    # Old Gemini Live recitation path kept for fallback/reference.
-    # spoken_final = _strip_klipy_from_text(final_text)
-    # if spoken_final and proxy.session_alive:
-    #     await proxy.send_text(spoken_final)
-
-
-async def _emit_demo_tts_turn(
-    *,
-    websocket: WebSocket,
-    proxy: "GeminiLiveProxy",
-    text: str,
-) -> None:
-    await _safe_send_json(websocket, {"type": "text", "text": text, "demo": True})
-    spoken = _strip_klipy_from_text(text)
-    if spoken:
-        audio_b64 = await proxy.synthesize_tts_b64(spoken)
-        if audio_b64:
-            await _safe_send_json(websocket, {"type": "audio", "data": audio_b64, "demo": True})
-    await _safe_send_json(websocket, {"type": "turnComplete"})
 
 
 def _pick_title(text: str) -> str:
@@ -632,67 +375,6 @@ def _pick_snippet(text: str, max_len: int = 280) -> str:
         snippet = snippet[: max_len - 3].rstrip() + "..."
     return snippet
 
-
-def _load_demo_evidence(dir_path: str) -> list[dict[str, Any]]:
-    if not dir_path or not os.path.isdir(dir_path):
-        return []
-    evidence: list[dict[str, Any]] = []
-    for name in sorted(os.listdir(dir_path)):
-        if not name.endswith(".txt"):
-            continue
-        path = os.path.join(dir_path, name)
-        try:
-            text = open(path, "r", encoding="utf-8").read()
-        except Exception:
-            continue
-        url = ""
-        for line in text.splitlines():
-            if line.strip().startswith("URL :"):
-                url = line.split("URL :", 1)[1].strip()
-                break
-        source = "source"
-        lower = name.lower()
-        if "caclub" in lower:
-            source = "caclub_india"
-        elif "taxtmi" in lower:
-            source = "taxtmi"
-        elif "turbotax" in lower:
-            source = "turbotax_blog"
-        evidence.append(
-            {
-                "source": source,
-                "title": _pick_title(text),
-                "url": url,
-                "snippet": _pick_snippet(text),
-                "date": _pick_date(text),
-                "reply_count": 0,
-            }
-        )
-    return evidence
-
-
-DEMO_EVIDENCE = _load_demo_evidence(os.path.join(os.path.dirname(__file__), "..", "demo"))
-
-
-def _build_demo_response(state: SessionState) -> str:
-    ctx = state.user_context or {}
-    intro = (
-        "Alright — here’s your clean, confident game plan. "
-        "You’ve got a serious US portfolio and a Kerala return in sight, so timing and structure matter."
-    )
-    bullets = [
-        "RNOR is your soft‑landing. After return, RNOR status can keep foreign income outside Indian tax for a limited window — that’s the key buffer to plan around.",
-        "Once you become full resident, India taxes global income. That’s why the sell/hold timing on your US portfolio matters a lot.",
-        "NRE balances are fine while you’re NRI, but after residency change, NRE FD interest becomes taxable — plan conversions early.",
-        "Use DTAA + foreign tax credit (Form 67) for any US taxes already paid.",
-    ]
-    closing = (
-        "If we lock the return window and map your holdings now, we can save real money — not just basis points."
-    )
-    question = "Want me to turn this into a 90‑day pre‑return checklist?"
-    response = intro + "\n\n" + "\n".join(f"- {b}" for b in bullets) + "\n\n" + closing + "\n" + question
-    response += "\n" + _format_klipy_block("gif", "rolling up sleeves lets get into it")
-    return response
 
 _INTERNAL_AGENT_MARKERS = (
     "my next step",
@@ -968,7 +650,6 @@ def _context_ready(state: SessionState) -> bool:
 
 def _build_query_builder_payload(state: SessionState) -> dict[str, Any]:
     ctx = state.user_context.copy()
-    ctx.setdefault("scenario", "REAL_CONTEXT")
     ctx.setdefault("jurisdiction", "cross-border" if ctx.get("location") else "unknown")
     return ctx
 
@@ -998,8 +679,6 @@ def _compose_system_instruction(
     memory_context: dict[str, Any] | None = None,
 ) -> str:
     blocks = [BASE_SYSTEM_INSTRUCTION, REAL_MODE_RULES]
-    if state.demo_mode:
-        blocks.append(DEMO_MODE_RULES)
 
     if persistent_memory_prompt:
         blocks.append(f"HISTORICAL MEMORY:\n{persistent_memory_prompt}")
@@ -1293,43 +972,6 @@ class GeminiLiveProxy:
             raise RuntimeError("Not connected to Gemini Live")
         await self.active_session.send_realtime_input(text=text)
 
-    async def synthesize_tts_b64(self, text: str, voice_name: str = "Aoede") -> str:
-        """Synthesize deterministic demo speech via Gemini TTS and return PCM16 audio as base64."""
-        from google.genai import types
-
-        response = await self.client.aio.models.generate_content(
-            model=TTS_MODEL,
-            contents=text,
-            config=types.GenerateContentConfig(
-                response_modalities=[types.Modality.AUDIO],
-                speech_config=types.SpeechConfig(
-                    voice_config=types.VoiceConfig(
-                        prebuilt_voice_config=types.PrebuiltVoiceConfig(
-                            voice_name=voice_name
-                        )
-                    )
-                ),
-            ),
-        )
-
-        audio_data = None
-        for candidate in getattr(response, "candidates", []) or []:
-            content = getattr(candidate, "content", None)
-            for part in getattr(content, "parts", []) or []:
-                inline_data = getattr(part, "inline_data", None)
-                data = getattr(inline_data, "data", None) if inline_data else None
-                if data:
-                    audio_data = data
-                    break
-            if audio_data:
-                break
-
-        if not audio_data:
-            return ""
-        if isinstance(audio_data, str):
-            return audio_data
-        return base64.b64encode(audio_data).decode("utf-8")
-
     async def receive_response(self) -> AsyncGenerator[dict, None]:
         """Receive response stream from Gemini Live"""
         if not self.active_session:
@@ -1399,21 +1041,6 @@ async def _forward_gemini_responses(
                         state.current_topics = (state.current_topics + [finalized_user_text[:120]])[-6:]
                         state.touch()
                     current_user_chunks = []
-                    if state.demo_mode:
-                        if state.demo_pending_sent and state.demo_pending_text:
-                            await _safe_send_json(websocket, {"type": "turnComplete"})
-                            state.demo_pending_text = ""
-                            state.demo_pending_sent = False
-                            state.demo_allow_audio = False
-                            if state.demo_finish_after_pending:
-                                state.demo_mode = False
-                                state.demo_finish_after_pending = False
-                        current_user_chunks = []
-                        current_agent_chunks = []
-                        state.last_tool_answer = ""
-                        state.pending_tool_answer = ""
-                        state.touch()
-                        continue
                     if not state.context_dispatched and _context_ready(state):
                         state.context_dispatched = True
                         state.touch()
@@ -1474,7 +1101,7 @@ async def _forward_gemini_responses(
                 if model_turn:
                     for part in getattr(model_turn, "parts", []):
                         part_text = getattr(part, "text", None)
-                        if part_text and not state.demo_mode:
+                        if part_text:
                             current_agent_chunks.append(part_text)
                             if not _is_low_quality_agent_text(part_text):
                                 await _safe_send_json(websocket, {
@@ -1488,11 +1115,10 @@ async def _forward_gemini_responses(
                             if audio_b64 is not None:
                                 if isinstance(audio_b64, bytes):
                                     audio_b64 = base64.b64encode(audio_b64).decode("utf-8")
-                                if not state.demo_mode or state.demo_allow_audio:
-                                    await _safe_send_json(websocket, {
-                                        "type": "audio",
-                                        "data": audio_b64,
-                                    })
+                                await _safe_send_json(websocket, {
+                                    "type": "audio",
+                                    "data": audio_b64,
+                                })
 
                 input_tx = getattr(server_content, "input_transcription", None)
                 if input_tx:
@@ -1508,7 +1134,6 @@ async def _forward_gemini_responses(
                             "content": input_text,
                             "finished": getattr(input_tx, "finished", True),
                         })
-                    # In demo mode, client-side speech recognition drives turn dispatch.
 
                 output_tx = getattr(server_content, "output_transcription", None)
                 if output_tx:
@@ -1519,27 +1144,11 @@ async def _forward_gemini_responses(
                     )
                     if output_text:
                         output_text = _sanitize_greeting(output_text, state)
-                        if state.demo_mode:
-                            if state.demo_allow_audio:
-                                if state.demo_pending_text and not state.demo_pending_sent:
-                                    await _safe_send_json(websocket, {
-                                        "type": "text",
-                                        "text": state.demo_pending_text,
-                                        "demo": True,
-                                    })
-                                    state.demo_pending_sent = True
-                                    state.touch()
-                                await _safe_send_json(websocket, {
-                                    "type": "output_transcription",
-                                    "content": output_text,
-                                    "finished": getattr(output_tx, "finished", True),
-                                })
-                        else:
-                            await _safe_send_json(websocket, {
-                                "type": "output_transcription",
-                                "content": output_text,
-                                "finished": getattr(output_tx, "finished", True),
-                            })
+                        await _safe_send_json(websocket, {
+                            "type": "output_transcription",
+                            "content": output_text,
+                            "finished": getattr(output_tx, "finished", True),
+                        })
 
             resumption_update = getattr(response, "session_resumption_update", None)
             if resumption_update:
@@ -1563,7 +1172,6 @@ async def _forward_gemini_responses(
                         "content": input_text,
                         "finished": getattr(input_tx, "finished", True),
                     })
-                    # In demo mode, client-side speech recognition drives turn dispatch.
 
             output_tx = getattr(response, "output_transcription", None)
             if output_tx:
@@ -1574,12 +1182,11 @@ async def _forward_gemini_responses(
                 )
                 if output_text:
                     output_text = _sanitize_greeting(output_text, state)
-                    if not state.demo_mode:
-                        await _safe_send_json(websocket, {
-                            "type": "output_transcription",
-                            "content": output_text,
-                            "finished": getattr(output_tx, "finished", True),
-                        })
+                    await _safe_send_json(websocket, {
+                        "type": "output_transcription",
+                        "content": output_text,
+                        "finished": getattr(output_tx, "finished", True),
+                    })
 
             tool_call = getattr(response, "tool_call", None)
             if tool_call:
@@ -1616,9 +1223,6 @@ async def _forward_gemini_responses(
                     state.last_tool_answer = _normalize_text(answer)
                     state.pending_tool_answer = state.last_tool_answer
                     state.touch()
-
-            # ── Demo Scenario 1 auto-dispatch ──────────────────────────
-            # Demo dispatch handled inside the streaming loop on turn_complete.
 
         proxy.session_alive = False
         logger.warning("gemini_live_session_ended")
@@ -1744,15 +1348,6 @@ def create_websocket_app() -> FastAPI:
                         session_id = data.get("session_id", "default")
                         user_id = data.get("user_id", "anonymous")
                         state = SESSION_STATE_STORE.get_or_create(user_id, session_id)
-                        state.demo_mode = bool(DEMO_MODE and DEMO_TURNS)
-                        if state.demo_mode:
-                            state.demo_index = 0
-                            state.demo_pending_text = ""
-                            state.demo_pending_sent = False
-                            state.demo_finish_after_pending = False
-                            state.demo_allow_audio = False
-                            state.demo_final_pending = False
-
                         # Read user-chosen config from the frontend SettingsDialog
                         voice_name = data.get("voice", "Aoede")
                         response_modalities = data.get("response_modalities", ["AUDIO"])
@@ -1794,7 +1389,6 @@ def create_websocket_app() -> FastAPI:
                         session_started = True
 
                         await _safe_send_json(websocket, {"type": "connected"})
-                        await _safe_send_json(websocket, {"type": "demo_mode", "enabled": state.demo_mode})
                         await _safe_send_json(
                             websocket,
                             {"type": "memory_context", "memory_context": {
@@ -1824,7 +1418,7 @@ def create_websocket_app() -> FastAPI:
                     if not session_started or not proxy.session_alive:
                         if not session_started:
                             continue
-                        if not state.demo_mode and not _is_voiced_audio_chunk(data["data"]):
+                        if not _is_voiced_audio_chunk(data["data"]):
                             continue
                         if not await ensure_live_session("audio"):
                             continue
@@ -1852,14 +1446,6 @@ def create_websocket_app() -> FastAPI:
                         continue
                     try:
                         text = data.get("text", "")
-                        if state.demo_mode and DEMO_TURNS:
-                            await _dispatch_demo_turn(
-                                websocket=websocket,
-                                proxy=proxy,
-                                state=state,
-                                user_text=text,
-                            )
-                            continue
                         if not proxy.session_alive and not await ensure_live_session("text"):
                             continue
                         await proxy.send_text(text)

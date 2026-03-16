@@ -85,8 +85,6 @@ Example:
 
 ```bash
 GOOGLE_API_KEY=...
-DEMO_MODE=true
-DEMO_SCENARIO_PATH=/opt/saulgoodman/repo/scenario1.txt
 ROOT_AGENT_URL=http://localhost:8000
 GRAPH_API_URL=http://localhost:8006
 ```
