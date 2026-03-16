@@ -1,281 +1,160 @@
-# TaxClarity — Multi-Agent Tax Advisory System
+# TaxClarity
 
-TaxClarity is an AI-powered tax advisory system that aggregates evidence from multiple Indian and US tax knowledge sources, enriches answers with legal citations from court judgements and statutes, and maintains a persistent memory graph of each user's tax profile. It is built on **Google ADK** (Agent Development Kit) with the **A2A** (Agent-to-Agent) protocol, backed by **Google Cloud Spanner** as a property graph database and **Gemini** as the LLM backbone.
+TaxClarity is a Gemini Live powered, multi agent tax advisor for India, the US, and cross border scenarios. It connects live voice and vision, evidence gathering, and long term memory so users can speak naturally and receive cited guidance with a knowledge graph that evolves over time.
 
----
+This README is aligned to the current codebase under `Taxclarity/` and the system diagram in `Architecture.png`.
 
-## Table of Contents
+## What This System Does
 
-1. [Architecture](#architecture)
-2. [Project Structure](#project-structure)
-3. [Getting Started](#getting-started)
-4. [Environment Variables](#environment-variables)
-5. [Services](#services)
-6. [Memory System](#memory-system)
-7. [Scraping Pipeline](#scraping-pipeline)
-8. [Deployment](#deployment)
+1. Accepts live user voice and optional camera input through the WebSocket chat interface.
+2. Routes tax questions to the Root Agent which orchestrates specialist agents via A2A.
+3. Collects evidence from CAClubIndia, TaxTMI, TurboTax, and TaxProfBlog.
+4. Builds responses with citations and contextualizes with long term memory.
+5. Updates the live knowledge graph and optional document intelligence pipeline.
 
----
+## Architecture Overview
 
-## Architecture
+The diagram in `Architecture.png` describes the flow:
 
-![Architecture](./Architecture.png)
+1. Gemini Live handles voice and real time response streaming.
+2. The WebSocket server coordinates the session, memory loading, and A2A tool calls.
+3. The Root Agent dispatches to region specific agents in India and the US.
+4. Vertex AI Memory Bank stores long term memory and feeds context back into prompts.
+5. The Knowledge Graph is rendered from Obsidian format nodes updated in real time.
+6. Optional document extraction uses Google Document AI with a Gemini Vision fallback.
 
-### Component Roles
+## Related Repository for Document Vision
 
-| Component | Role |
-|-----------|------|
-| **WebSocket Server (:8003)** | Handles real-time voice/audio communication, session management, and orchestrates live queries |
-| **Root Agent (:8000)** | Orchestrator. Detects smalltalk, loads memory, dispatches to sub-agents, runs legal enrichment, finalizes response, persists memory |
-| **Sub-Agents (CAClub, TaxTMI, TurboTax, TaxProfBlog)** | Each wraps a scraper behind an A2A server. Receives a query, runs the scraper, returns structured evidence |
-| **Scrapers** | Standalone Python scripts that fetch and parse web pages from tax knowledge sites |
-| **Legal Enrichment** | Fetches Indian Kanoon statutes and Casemine court judgements |
-| **Memory System** | Spanner property graph + SQL persistence for user profiles, queries, concepts, entities, resolutions |
-| **Graph API (:8006)** | FastAPI app exposing knowledge graph endpoints |
+The document vision pipeline lives in a separate repository. You can find it here:
 
----
+```
+https://github.com/LE-TAPU-KOKO/Saul
+```
+
+## Key Principles
+
+1. Gemini Live only for audio in and audio out.
+2. Memory uses Vertex AI Memory Bank for long term context.
+3. Evidence and citations must be visible and traceable in the UI.
+4. The UI streams agent output and live transcriptions from Gemini Live.
+5. The knowledge graph updates as the conversation evolves.
 
 ## Project Structure
 
-```
-TaxClarity/
-├── config.py                     # Centralized configuration (env vars)
-├── requirements.txt              # Python dependencies
-├── pyproject.toml                # Project metadata
-├── Dockerfile                    # Container build
-├── Procfile                      # Process definitions for honcho
-├── nginx.conf                    # Nginx configuration
-├── run.sh                        # Start all backend servers
-├── stop.sh                       # Stop all servers
-│
-├── agents/                       # ADK agents + scrapers
-│   ├── agent.py                  # ADK web entrypoint
-│   ├── caclub_agent.py           # CAClubIndia scraper
-│   ├── taxtmi_agent.py           # TaxTMI scraper
-│   ├── turbotax_agent.py         # TurboTax scraper
-│   ├── taxprofblog_agent.py      # TaxProfBlog scraper
-│   ├── calculation_agent.py       # Tax liability calculator
-│   ├── contradiction_agent.py     # Contradiction detection
-│   │
-│   └── adk/                      # Google ADK A2A agents
-│       ├── root_agent/           # Root orchestrator (:8000)
-│       ├── caclub_a2a/           # CAClubIndia (:8001)
-│       ├── taxtmi_a2a/           # TaxTMI (:8002)
-│       ├── taxprofblog_a2a/       # TaxProfBlog (:8004)
-│       ├── turbotax_a2a/         # TurboTax (:8005)
-│       ├── geo_router/           # Geographic routing agent
-│       └── cache.py              # File-based caching (SHA256 + TTL)
-│
-├── backend/                      # Backend services
-│   ├── websocket_server.py         # WebSocket server (:8003)
-│   ├── graph_api.py               # Knowledge graph API (:8006)
-│   ├── live_orchestrator.py       # Live query orchestration
-│   ├── session_state.py           # Session state management
-│   ├── memory_bank.py             # Memory bank interface
-│   ├── obsidian_graph.py          # Graph persistence
-│   ├── bot.py                     # Bot utilities
-│   ├── errors.py                  # Error definitions
-│   ├── health.py                  # Health check endpoints
-│   └── document_extractor.py      # Document extraction
-│
-├── memory/                        # Memory system
-│   ├── memory_service.py          # Memory service abstraction
-│   ├── sql_memory_store.py        # SQL (Cloud SQL) persistence
-│   ├── spanner_graph.py            # Spanner property graph
-│   ├── vertex_memory_bank.py       # Vertex AI memory bank adapter
-│   ├── pageindex_store.py          # PageIndex integration
-│   └── extractor.py                # Gemini-based extraction
-│
-├── frontend-next/                 # Next.js frontend (recommended)
-│   ├── src/
-│   │   ├── app/                   # Next.js app router
-│   │   ├── components/            # React components
-│   │   ├── hooks/                 # Custom hooks
-│   │   └── lib/                   # Utilities
-│   └── package.json
-│
-├── frontend/                      # Legacy vanilla JS frontend
-│
-├── schemas/                       # JSON schemas
-│   └── a2a_schema.json
-│
-├── scripts/                       # Utility scripts
-│   ├── spanner_init.py            # Initialize Spanner database
-│   ├── verify_gcp.py              # Verify GCP setup
-│   └── gcp_setup.sh               # GCP provisioning
-│
-├── tests/                         # Test suite
-│   ├── agents/                    # Agent tests
-│   ├── backend/                   # Backend tests
-│   ├── memory/                    # Memory tests
-│   ├── e2e/                       # End-to-end tests
-│   └── manual/                    # Manual tests
-│
-├── demo/                          # Demo conversation logs
-│
-└── New_vertex/                    # Alternative vertex implementation
-```
+All active runtime code lives under `Taxclarity/`.
 
----
+1. `Taxclarity/backend` contains the WebSocket server, graph API, session state, memory bridge, and orchestration.
+2. `Taxclarity/agents` contains the Root Agent and A2A sub agents for evidence sources.
+3. `Taxclarity/memory` contains the Vertex memory bank adapter and extractors.
+4. `Taxclarity/frontend` contains the Next.js UI used in production.
+5. `Taxclarity/docs` contains deployment notes and operations guides.
 
-## Getting Started
+## Installation
 
-### Prerequisites
+Recommended package manager is `uv`.
 
-- Python 3.12+
-- Node.js 18+ (for frontend)
-- Google Cloud project with Spanner instance (optional)
-- A Gemini API key
+1. Install uv.
+2. Create and activate a virtual environment.
+3. Install dependencies.
 
-### Installation
+Example:
 
 ```bash
-# Clone and navigate to project
-cd TaxClarity
-
-# Create virtual environment
-python -m venv .venv
+cd Taxclarity
+uv venv
 source .venv/bin/activate
+uv pip install -r requirements.txt
+```
 
-# Install Python dependencies
-pip install -r requirements.txt
+For frontend:
 
-# Install frontend dependencies (if using frontend-next)
-cd frontend-next
+```bash
+cd Taxclarity/frontend
 npm install
-cd ..
 ```
 
-### Configuration
+## Environment Setup
+
+Create a `.env` in `Taxclarity/`.
+
+Required values:
+
+1. `GOOGLE_API_KEY` for Gemini Live and Vertex AI Memory Bank
+2. `ROOT_AGENT_URL` default `http://localhost:8000`
+3. `GRAPH_API_URL` default `http://localhost:8006`
+4. `VOICE_MODEL` for Gemini Live audio model
+
+Important memory settings:
+
+1. `MEMORY_PROVIDER` set to `vertex`
+2. `USE_VERTEX_MEMORY` set to `true`
+3. `USE_CLOUD_SQL_MEMORY` set to `false`
+
+## Running Locally
+
+Start backend services:
 
 ```bash
-# Copy environment template
-cp .env.example .env
-
-# Edit .env and fill in required variables:
-#   GOOGLE_API_KEY=your_gemini_key
-#   (Spanner vars if you want memory persistence)
-```
-
-### Running
-
-**Start all backend servers:**
-
-```bash
+cd Taxclarity
 ./run.sh
 ```
 
-This launches 7 services:
-- `:8000` — Root orchestrator agent
-- `:8001` — CAClubIndia sub-agent
-- `:8002` — TaxTMI sub-agent
-- `:8003` — WebSocket server
-- `:8004` — TaxProfBlog sub-agent
-- `:8005` — TurboTax sub-agent
-- `:8006` — Graph API
+This starts the following services:
 
-**Start frontend (Next.js):**
+1. Root Agent on `8000`
+2. CAClubIndia agent on `8001`
+3. TaxTMI agent on `8002`
+4. WebSocket server on `8003`
+5. TaxProfBlog agent on `8004`
+6. TurboTax agent on `8005`
+7. Graph API on `8006`
+
+Start the frontend:
 
 ```bash
-cd frontend-next
+cd Taxclarity/frontend
 npm run dev
 ```
 
-Then open http://localhost:3000 in your browser.
+Open `http://localhost:3000`.
 
+## Knowledge Graph
 
-## Environment Variables
-
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `GOOGLE_API_KEY` | Yes | — | Gemini API key |
-| `SPANNER_PROJECT_ID` | No | — | Google Cloud project ID |
-| `SPANNER_INSTANCE_ID` | No | — | Spanner instance ID |
-| `SPANNER_DATABASE_ID` | No | — | Spanner database ID |
-| `ROOT_AGENT_URL` | No | http://localhost:8000 | Root agent URL |
-| `GRAPH_API_URL` | No | http://localhost:8006 | Graph API URL |
-| `VOICE_MODEL` | No | gemini-2.5-flash-native-audio-preview-12-2025 | Gemini Live model |
-| `TTS_MODEL` | No | gemini-2.5-flash-preview-tts | TTS model |
-| `MEMORY_PROVIDER` | No | vertex_sql | Memory provider |
-| `USE_VERTEX_MEMORY` | No | false | Use Vertex memory |
-| `USE_CLOUD_SQL_MEMORY` | No | true | Use Cloud SQL memory |
-| `DISABLE_SPANNER_MEMORY` | No | true | Disable Spanner memory |
-| `CLOUD_SQL_DATABASE_URL` | No | sqlite:///taxagent_memory.db | Database URL |
-| `SESSION_CACHE_TTL_MINUTES` | No | 15 | Session cache TTL |
-| `LOG_LEVEL` | No | INFO | Logging level |
-
----
-
-## Services
-
-### A2A Agents
-
-All agents communicate via the A2A (Agent-to-Agent) protocol:
-
-| Port | Agent | Description |
-|------|-------|-------------|
-| 8000 | Root Agent | Main orchestrator |
-| 8001 | CAClubIndia | Indian tax forum scraper |
-| 8002 | TaxTMI | Indian tax forum scraper |
-| 8004 | TaxProfBlog | US tax blog scraper |
-| 8005 | TurboTax | US tax service scraper |
-
-### Graph API
-
-Exposes endpoints for knowledge graph operations:
-
-- `GET /users` — List users
-- `GET /sessions` — List sessions
-- `GET /graph` — Get user knowledge graph
-- `GET /health` — Health check
-
----
+1. The UI shows a live knowledge graph on the left panel.
+2. Nodes and relationships are updated on each turn.
+3. Data is stored in Obsidian format under `Taxclarity/data/obsidian_vault`.
+4. The Graph API serves these nodes to the frontend.
 
 ## Memory System
 
-### Spanner Property Graph
+Long term memory is handled by Vertex AI Memory Bank.
 
-Models user tax knowledge as a connected graph:
+1. The memory service loads prior summaries and topics on session start.
+2. The Root Agent injects that memory into the system prompt.
+3. The graph is enriched from both user and agent turns.
 
-**Node Tables:**
-- Users, Sessions, Queries
-- Concepts (e.g., "Section 80C", "Capital Gains")
-- TaxEntities (salary, property, investments)
-- Jurisdictions (India, US)
-- TaxForms (ITR-1, W-2)
-- Resolutions, Ambiguities
+## Evidence and Citations
 
-**Edge Types:**
-- User --HAS_SESSION--> Session
-- Session --CONTAINS--> Query
-- Query --REFERENCES--> Concept
-- Query --RESOLVED_BY--> Resolution
-- TaxEntity --GOVERNED_BY--> Jurisdiction
+1. Each agent returns structured evidence items.
+2. The Root Agent synthesizes a single response with citations.
+3. The UI renders sources and links in the right panel.
 
-### SQL Memory
+## Deployment
 
-Alternative memory using Cloud SQL (PostgreSQL/SQLite) for session persistence.
+This repository supports Vercel for frontend and a Google Cloud VM for backend.
 
----
+1. Vercel builds from `Taxclarity/frontend`.
+2. Backend runs on a VM with systemd and Nginx.
+3. WebSocket endpoint is exposed over TLS using Nginx.
 
-## Scraping Pipeline
+See `Taxclarity/docs/deployment-vercel-gce.md` for operational steps.
 
-All scrapers use a 3-tier fallback strategy:
+Automated backend deployment is configured in:
 
-1. **HTTP** — Fast, uses scrapling.Fetcher
-2. **Dynamic** — Medium, uses Playwright headless browser
-3. **Stealth** — Slow, uses anti-bot browser with Cloudflare solving
+```
+.github/workflows/deploy-backend-vm.yml
+```
 
-### Sources
+## License
 
-| Source | Site | Content |
-|--------|------|---------|
-| CAClubIndia | caclubindia.com | Expert threads, forums |
-| TaxTMI | taxtmi.com | Forums, articles |
-| TurboTax | turbotax.intuit.com | Help articles |
-| TaxProfBlog | taxprofblog.com | Blog articles |
-| Indian Kanoon | indiankanoon.org | Statutes |
-| Casemine | casemine.com | Court judgements |
-
----
-
+Internal project for the Gemini Live Agent Challenge.
