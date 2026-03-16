@@ -1,77 +1,71 @@
-# TaxClarity
+# Saul Goodman AI
 
-TaxClarity is a Gemini Live powered, multi agent tax advisor for India, the US, and cross border scenarios. It connects live voice and vision, evidence gathering, and long term memory so users can speak naturally and receive cited guidance with a knowledge graph that evolves over time.
+Saul Goodman AI is a Gemini Live powered, multi agent tax advisor for India, the US, and cross border scenarios. It connects live voice and vision, evidence gathering, and long term memory so users can speak naturally and receive cited guidance with a knowledge graph that evolves over time.
 
 This README is aligned to the current codebase under `Taxclarity/` and the system diagram in `Architecture.png`.
 
-## What This System Does
+## Quick Start
 
-1. Accepts live user voice and optional camera input through the WebSocket chat interface.
-2. Routes tax questions to the Root Agent which orchestrates specialist agents via A2A.
-3. Collects evidence from CAClubIndia, TaxTMI, TurboTax, and TaxProfBlog.
-4. Builds responses with citations and contextualizes with long term memory.
-5. Updates the live knowledge graph and optional document intelligence pipeline.
-
-## Architecture Overview
-
-The diagram in `Architecture.png` describes the flow:
-
-1. Gemini Live handles voice and real time response streaming.
-2. The WebSocket server coordinates the session, memory loading, and A2A tool calls.
-3. The Root Agent dispatches to region specific agents in India and the US.
-4. Vertex AI Memory Bank stores long term memory and feeds context back into prompts.
-5. The Knowledge Graph is rendered from Obsidian format nodes updated in real time.
-6. Optional document extraction uses Google Document AI with a Gemini Vision fallback.
-
-## Related Repository for Document Vision
-
-The document vision pipeline lives in a separate repository. You can find it here:
-
-```
-https://github.com/LE-TAPU-KOKO/Saul
-```
-
-## Key Principles
-
-1. Gemini Live only for audio in and audio out.
-2. Memory uses Vertex AI Memory Bank for long term context.
-3. Evidence and citations must be visible and traceable in the UI.
-4. The UI streams agent output and live transcriptions from Gemini Live.
-5. The knowledge graph updates as the conversation evolves.
-
-## Project Structure
-
-All active runtime code lives under `Taxclarity/`.
-
-1. `Taxclarity/backend` contains the WebSocket server, graph API, session state, memory bridge, and orchestration.
-2. `Taxclarity/agents` contains the Root Agent and A2A sub agents for evidence sources.
-3. `Taxclarity/memory` contains the Vertex memory bank adapter and extractors.
-4. `Taxclarity/frontend` contains the Next.js UI used in production.
-5. `Taxclarity/docs` contains deployment notes and operations guides.
-
-## Installation
-
-Recommended package manager is `uv`.
-
-1. Install uv.
-2. Create and activate a virtual environment.
-3. Install dependencies.
-
-Example:
+1. Install uv and create a virtual environment.
+2. Install backend dependencies.
+3. Start the backend services.
+4. Start the frontend.
 
 ```bash
 cd Taxclarity
 uv venv
 source .venv/bin/activate
 uv pip install -r requirements.txt
+./run.sh
 ```
 
-For frontend:
+In another terminal:
 
 ```bash
 cd Taxclarity/frontend
 npm install
+npm run dev
 ```
+
+Open `http://localhost:3000`.
+
+## Architecture Overview
+
+![Architecture](./Architecture.png)
+
+The flow is:
+
+1. Gemini Live handles real time voice and response streaming.
+2. The WebSocket server coordinates the session and A2A tool calls.
+3. The Root Agent dispatches to regional agents in India and the US.
+4. Vertex AI Memory Bank provides long term context.
+5. The Knowledge Graph updates from every turn.
+6. Optional document extraction uses Google Document AI with a Gemini Vision fallback.
+
+## What You Can Do
+
+1. Speak or type tax questions and receive cited responses.
+2. See live agent responses and sources in the right panel.
+3. Watch the knowledge graph grow as the conversation progresses.
+4. Use camera input for document or context awareness.
+
+## Related Repository for Document Vision
+
+The document vision pipeline lives in a separate repository:
+
+```
+https://github.com/LE-TAPU-KOKO/Saul
+```
+
+## Project Structure
+
+Active runtime code lives under `Taxclarity/`.
+
+1. `Taxclarity/backend` contains the WebSocket server, graph API, session state, memory bridge, and orchestration.
+2. `Taxclarity/agents` contains the Root Agent and A2A sub agents for evidence sources.
+3. `Taxclarity/memory` contains the Vertex memory bank adapter and extractors.
+4. `Taxclarity/frontend` contains the Next.js UI used in production.
+5. `Taxclarity/docs` contains deployment notes and operations guides.
 
 ## Environment Setup
 
@@ -84,7 +78,7 @@ Required values:
 3. `GRAPH_API_URL` default `http://localhost:8006`
 4. `VOICE_MODEL` for Gemini Live audio model
 
-Important memory settings:
+Memory settings:
 
 1. `MEMORY_PROVIDER` set to `vertex`
 2. `USE_VERTEX_MEMORY` set to `true`
@@ -99,7 +93,7 @@ cd Taxclarity
 ./run.sh
 ```
 
-This starts the following services:
+This starts:
 
 1. Root Agent on `8000`
 2. CAClubIndia agent on `8001`
@@ -120,16 +114,16 @@ Open `http://localhost:3000`.
 
 ## Knowledge Graph
 
-1. The UI shows a live knowledge graph on the left panel.
-2. Nodes and relationships are updated on each turn.
+1. The left panel renders a live knowledge graph.
+2. Nodes and relationships update on each turn.
 3. Data is stored in Obsidian format under `Taxclarity/data/obsidian_vault`.
-4. The Graph API serves these nodes to the frontend.
+4. The Graph API serves nodes to the frontend.
 
 ## Memory System
 
 Long term memory is handled by Vertex AI Memory Bank.
 
-1. The memory service loads prior summaries and topics on session start.
+1. The memory service loads prior summaries and topics at session start.
 2. The Root Agent injects that memory into the system prompt.
 3. The graph is enriched from both user and agent turns.
 

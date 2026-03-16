@@ -36,7 +36,7 @@ export default function StatusPage() {
   return (
     <main className="min-h-screen bg-[#070b16] text-slate-100 flex items-center justify-center px-6">
       <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-white/5 p-6 shadow-[0_20px_60px_rgba(0,0,0,0.35)]">
-        <h1 className="text-lg font-semibold">Saul Goodman Status</h1>
+        <h1 className="text-lg font-semibold">Saul Goodman AI Status</h1>
         <p className="mt-1 text-sm text-slate-300">Frontend: OK</p>
         <div className="mt-4 rounded-xl border border-white/10 bg-black/30 p-4">
           <div className="flex items-center justify-between">

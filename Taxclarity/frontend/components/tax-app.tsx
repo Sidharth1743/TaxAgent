@@ -897,7 +897,7 @@ export function SaulGoodmanApp() {
                 </svg>
               </div>
               <div>
-                <h1 className="text-sm font-semibold tracking-tight">Saul Goodman</h1>
+                <h1 className="text-sm font-semibold tracking-tight">Saul Goodman AI</h1>
               </div>
             </div>
           </div>
@@ -1057,7 +1057,7 @@ export function SaulGoodmanApp() {
             ))}
           </div>
           <div className="flex items-center gap-2 text-[10px] font-mono text-muted-foreground">
-            <span>Saul Goodman</span>
+            <span>Saul Goodman AI</span>
             <span className="size-0.5 rounded-full bg-muted-foreground/50" />
             <span>Live tax intelligence</span>
           </div>
