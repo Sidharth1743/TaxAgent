@@ -386,43 +386,6 @@ Scrape usage:
 
 ---
 
-## Graph Database Schema
-
-The Spanner property graph (`tax_graph`) models the user's tax knowledge as a connected graph:
-
-### Node Tables
-
-| Table | Key | Description |
-|---|---|---|
-| `Users` | `user_id` | Registered users |
-| `Sessions` | `session_id` | Conversation sessions |
-| `Queries` | `query_id` | Individual tax questions |
-| `Concepts` | `concept_id` | Tax concepts (e.g., "Section 80C", "Capital Gains") |
-| `TaxEntities` | `entity_id` | Financial entities (salary, property, investments) |
-| `Jurisdictions` | `jurisdiction_id` | Tax jurisdictions (India, US, etc.) |
-| `TaxForms` | `form_id` | Tax forms (ITR-1, W-2, etc.) |
-| `Resolutions` | `resolution_id` | Answers with status and confidence |
-| `Ambiguities` | `ambiguity_id` | Unresolved topics needing clarification |
-
-### Edge Types
-
-```
-User --HAS_SESSION--> Session
-Session --CONTAINS--> Query
-Query --REFERENCES--> Concept
-Query --INVOLVES--> TaxEntity
-Query --RESOLVED_BY--> Resolution
-Resolution --CITES--> Concept
-TaxEntity --GOVERNED_BY--> Jurisdiction
-TaxEntity --REPORTED_ON--> TaxForm
-TaxForm --LINKED_TO--> Jurisdiction
-User --OWNS--> TaxEntity
-```
-
-This graph enables the memory system to retrieve relevant prior resolutions when a user asks a new question — by matching on shared concepts and entities.
-
----
-
 ## Scraping Pipeline
 
 All scrapers use a shared 3-tier fallback strategy (defined in `scraping/utils.py`):
