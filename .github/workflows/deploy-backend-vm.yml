@@ -23,15 +23,6 @@ jobs:
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H "${{ secrets.VM_HOST }}" >> ~/.ssh/known_hosts
 
-      - name: Sync repository to VM
-        run: |
-          rsync -az --delete \
-            --exclude ".git" \
-            --exclude "Taxclarity/.venv" \
-            --exclude "Taxclarity/frontend/node_modules" \
-            --exclude "Taxclarity/data" \
-            ./ "${{ secrets.VM_USER }}@${{ secrets.VM_HOST }}:/opt/saulgoodman/repo/"
-
       - name: Deploy on VM
         run: |
           ssh "${{ secrets.VM_USER }}@${{ secrets.VM_HOST }}" \
